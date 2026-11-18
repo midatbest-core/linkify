@@ -19,7 +19,7 @@ server/                 Express API
 - Node.js 20 or newer and npm
 - MongoDB locally, or a MongoDB Atlas connection string
 
-Install dependencies with `npm install`, copy `.env.example` to `server/.env`, and set `MONGODB_URI`. Run `npm run dev` to start the API at `http://localhost:5000` and client at `http://localhost:5173`. Check readiness at `http://localhost:5000/api/health`.
+Install dependencies with `npm install`, copy `.env.example` to `server/.env`, and set `MONGODB_URI`. Run `npm run dev` to start the API at `http://localhost:5000` and client at `http://localhost:5174`. Vite is pinned to port 5174 and exits with an error if that port is unavailable. Check readiness at `http://localhost:5000/api/health`.
 
 ## Environment variables
 
@@ -27,7 +27,7 @@ Install dependencies with `npm install`, copy `.env.example` to `server/.env`, a
 | --- | --- | --- | --- |
 | `PORT` | Server | Listening port | `5000` |
 | `MONGODB_URI` | Server | MongoDB connection string | `mongodb://127.0.0.1:27017/linkify` |
-| `CLIENT_ORIGIN` | Server | Allowed browser origin for CORS | `http://localhost:5173` |
+| `CLIENT_ORIGIN` | Server | Exact allowed browser origin for CORS | `http://localhost:5174` |
 | `SHORT_BASE_URL` | Server | Public base URL for generated links | `http://localhost:5000` |
 | `VITE_API_URL` | Client | API base URL | `http://localhost:5000` |
 

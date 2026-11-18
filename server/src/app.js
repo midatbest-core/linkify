@@ -7,7 +7,7 @@ import healthRouter from './routes/health.js';
 import { createLinksRouter } from './routes/links.js';
 import { createRedirectRouter } from './routes/redirect.js';
 
-export function createApp({ linkModel = Link } = {}) {
+export function createApp({ linkModel = Link, clientOrigin = process.env.CLIENT_ORIGIN ?? 'http://localhost:5174' } = {}) {
   const app = express();
   const createLinkLimit = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -24,7 +24,7 @@ export function createApp({ linkModel = Link } = {}) {
     message: { error: 'Too many alias checks. Please try again in a few minutes.' },
   });
 
-  app.use(cors({ origin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5173' }));
+  app.use(cors({ origin: (requestOrigin, callback) => callback(null, requestOrigin === clientOrigin) }));
   app.use(express.json());
   app.use('/api/health', healthRouter);
   app.use('/api/links', (request, response, next) => request.method === 'POST'

@@ -1,9 +1,46 @@
 import { Router } from 'express';
 import Link from '../models/Link.js';
 import { createLinkService, AliasConflictError } from '../services/linkService.js';
+import mongoose from 'mongoose';
+
+function serializeLink(link, baseUrl) {
+  const isCustomAlias = link.isCustomAlias ?? !/^[0-9a-zA-Z]{7}$/.test(link.shortCode);
+  return {
+    id: link.id ?? link._id?.toString(), originalUrl: link.originalUrl,
+    shortCode: link.shortCode, shortUrl: `${baseUrl}/${link.shortCode}`,
+    isCustomAlias, createdAt: link.createdAt,
+  };
+}
 
 export function createLinksRouter({ linkModel = Link, linkService = createLinkService(linkModel) } = {}) {
   const router = Router();
+
+  router.get('/', async (request, response, next) => {
+    try {
+      const links = await linkModel.find({}).sort({ createdAt: -1 });
+      const baseUrl = (process.env.SHORT_BASE_URL ?? `${request.protocol}://${request.get('host')}`).replace(/\/$/, '');
+      response.json({ links: links.map((link) => serializeLink(link, baseUrl)) });
+    } catch (error) { next(error); }
+  });
+
+  router.get('/:id', async (request, response, next) => {
+    if (!mongoose.isValidObjectId(request.params.id)) return response.status(400).json({ error: 'Invalid link ID.' });
+    try {
+      const link = await linkModel.findById(request.params.id);
+      if (!link) return response.status(404).json({ error: 'Link not found.' });
+      const baseUrl = (process.env.SHORT_BASE_URL ?? `${request.protocol}://${request.get('host')}`).replace(/\/$/, '');
+      response.json({ link: serializeLink(link, baseUrl) });
+    } catch (error) { next(error); }
+  });
+
+  router.delete('/:id', async (request, response, next) => {
+    if (!mongoose.isValidObjectId(request.params.id)) return response.status(400).json({ error: 'Invalid link ID.' });
+    try {
+      const deleted = await linkModel.findByIdAndDelete(request.params.id);
+      if (!deleted) return response.status(404).json({ error: 'Link not found.' });
+      response.json({ message: 'Link deleted.', id: request.params.id });
+    } catch (error) { next(error); }
+  });
 
   router.post('/', async (request, response, next) => {
     try {
@@ -14,6 +51,7 @@ export function createLinksRouter({ linkModel = Link, linkService = createLinkSe
         originalUrl: link.originalUrl,
         shortCode: link.shortCode,
         shortUrl: `${baseUrl}/${link.shortCode}`,
+        isCustomAlias: link.isCustomAlias ?? Boolean(request.body?.customAlias),
         createdAt: link.createdAt,
       });
     } catch (error) {

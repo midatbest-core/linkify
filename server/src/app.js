@@ -27,7 +27,9 @@ export function createApp({ linkModel = Link } = {}) {
   app.use(cors({ origin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5173' }));
   app.use(express.json());
   app.use('/api/health', healthRouter);
-  app.use('/api/links', createLinkLimit, createLinksRouter({ linkModel }));
+  app.use('/api/links', (request, response, next) => request.method === 'POST'
+    ? createLinkLimit(request, response, next)
+    : next(), createLinksRouter({ linkModel }));
   app.use('/api/aliases', aliasCheckLimit, createAliasesRouter({ linkModel }));
   app.use('/', createRedirectRouter({ linkModel }));
   app.use((error, _request, response, _next) => {

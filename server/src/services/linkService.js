@@ -54,7 +54,7 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
       if (alias.error) throw Object.assign(new Error(alias.error), { status: 400 });
       shortCode = alias.value;
       try {
-        return await Link.create({ originalUrl: destination.value, shortCode });
+        return await Link.create({ originalUrl: destination.value, shortCode, isCustomAlias: true });
       } catch (error) {
         if (error?.code !== 11000) throw error;
         throw new AliasConflictError(shortCode, await suggestAliases(shortCode));
@@ -64,7 +64,7 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
     for (let attempt = 0; attempt < RANDOM_CODE_ATTEMPTS; attempt += 1) {
       shortCode = codeGenerator();
       try {
-        return await Link.create({ originalUrl: destination.value, shortCode });
+        return await Link.create({ originalUrl: destination.value, shortCode, isCustomAlias: false });
       } catch (error) {
         if (error?.code !== 11000) throw error;
       }

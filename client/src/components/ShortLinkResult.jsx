@@ -1,3 +1,5 @@
+import QrCode from './QrCode.jsx';
+
 function ShortLinkResult({ link, copyState, onCopy }) {
   if (!link) return null;
 
@@ -24,6 +26,7 @@ function ShortLinkResult({ link, copyState, onCopy }) {
           <><span aria-hidden="true">▢</span> Copy short link</>
         )}
       </button>
+      <div className="mt-4 border-t border-[#c8e3ba] pt-4"><p className="mb-3 text-sm font-semibold text-[#295f22]">Scan to open this short link</p><div className="max-w-[220px]"><QrCode value={link.shortUrl} name={`linkify-${link.shortCode}`} /></div></div>
     </section>
   );
 }

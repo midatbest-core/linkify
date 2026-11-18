@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import AliasSuggestions from '../components/AliasSuggestions.jsx';
 import ShortLinkResult from '../components/ShortLinkResult.jsx';
 import StatusMessage from '../components/StatusMessage.jsx';
+import LinkDashboard from '../components/LinkDashboard.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:5000';
 
@@ -57,6 +58,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [copyState, setCopyState] = useState('idle');
+  const [view, setView] = useState('create');
   const aliasRequestId = useRef(0);
 
   async function checkAlias() {
@@ -172,10 +174,10 @@ function App() {
           <BrandMark />
           <span className="text-xl font-semibold tracking-[-0.04em] sm:text-[22px]">linkify</span>
         </a>
-        <span className="rounded-full border border-[#dce8d6] bg-white/80 px-3 py-1.5 text-xs font-medium text-[#295f22] sm:px-4 sm:text-sm">Make every link count</span>
+        <nav className="flex shrink-0 items-center gap-1 sm:gap-2"><button onClick={() => setView('create')} className={`whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3 sm:text-sm ${view === 'create' ? 'bg-[#e9f5e3] text-[#295f22]' : 'text-[#526052] hover:bg-white'}`}>Create link</button><button onClick={() => setView('dashboard')} className={`whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3 sm:text-sm ${view === 'dashboard' ? 'bg-[#e9f5e3] text-[#295f22]' : 'text-[#526052] hover:bg-white'}`}>Dashboard</button></nav>
       </header>
 
-      <section className="relative mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-10 px-4 pb-16 pt-9 sm:px-7 sm:pb-20 sm:pt-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(300px,0.75fr)] lg:gap-20 lg:px-10 lg:pb-24 lg:pt-16">
+      {view === 'dashboard' ? <LinkDashboard /> : <section className="relative mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-10 px-4 pb-16 pt-9 sm:px-7 sm:pb-20 sm:pt-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(300px,0.75fr)] lg:gap-20 lg:px-10 lg:pb-24 lg:pt-16">
         <div className="min-w-0">
           <p className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border border-[#dce8d6] bg-white/80 px-3 py-1.5 text-xs font-semibold text-[#295f22] sm:mb-6 sm:px-3.5 sm:text-sm">
             <span className="size-2 rounded-full bg-[#429f24] shadow-[0_0_0_4px_rgba(66,159,36,0.1)]" /> The simpler way to share
@@ -293,7 +295,7 @@ function App() {
             </div>
           </div>
         </aside>
-      </section>
+      </section>}
 
       <footer className="relative border-t border-[#e8eee5] bg-white/45 px-4 py-5 text-center text-xs text-[#718071] sm:px-6 sm:py-6 sm:text-sm">Linkify <span className="mx-1 text-[#a0aa9f]">·</span> A clearer way to share links.</footer>
     </main>

@@ -4,6 +4,7 @@ import { createApp } from '../src/app.js';
 
 function createMemoryLinkModel() {
   const records = new Map();
+  const byId = new Map();
   return {
     records,
     async exists({ shortCode }) {
@@ -15,12 +16,21 @@ function createMemoryLinkModel() {
         error.code = 11000;
         throw error;
       }
-      const saved = { ...record, _id: String(records.size + 1), id: String(records.size + 1), createdAt: new Date() };
+      const id = `${String(records.size + 1).padStart(24, '0')}`;
+      const saved = { ...record, _id: id, id, createdAt: new Date() };
       records.set(record.shortCode, saved);
+      byId.set(id, saved);
       return saved;
     },
     async findOne({ shortCode }) {
       return records.get(shortCode) ?? null;
+    },
+    find() { return { sort: async () => [...records.values()].reverse() }; },
+    async findById(id) { return byId.get(String(id)) ?? null; },
+    async findByIdAndDelete(id) {
+      const record = byId.get(String(id));
+      if (record) { byId.delete(String(id)); records.delete(record.shortCode); }
+      return record ?? null;
     },
   };
 }
@@ -100,5 +110,40 @@ test('redirects saved codes and returns 404 for unknown codes', async () => {
   assert.equal(redirect.headers.get('location'), 'https://example.org/');
 
   const missing = await fetch(`${baseUrl}/unknown-code`, { redirect: 'manual' });
+  assert.equal(missing.status, 404);
+});
+
+test('lists links and retrieves one link by ID', async () => {
+  const created = [...model.records.values()][0];
+  const list = await fetch(`${baseUrl}/api/links`);
+  const body = await list.json();
+  assert.equal(list.status, 200);
+  assert.ok(Array.isArray(body.links));
+  assert.ok(body.links.some((link) => link.id === created.id));
+
+  const detail = await fetch(`${baseUrl}/api/links/${created.id}`);
+  assert.equal(detail.status, 200);
+  assert.equal((await detail.json()).link.shortCode, created.shortCode);
+});
+
+test('returns consistent missing and invalid ID errors', async () => {
+  const invalid = await fetch(`${baseUrl}/api/links/not-an-id`);
+  assert.equal(invalid.status, 400);
+  assert.deepEqual(await invalid.json(), { error: 'Invalid link ID.' });
+  const missing = await fetch(`${baseUrl}/api/links/ffffffffffffffffffffffff`);
+  assert.equal(missing.status, 404);
+  assert.deepEqual(await missing.json(), { error: 'Link not found.' });
+});
+
+test('deletes only the requested link and reports a nonexistent ID', async () => {
+  const target = [...model.records.values()].find((record) => record.shortCode === 'spring-sale');
+  const unrelated = [...model.records.keys()].filter((code) => code !== target.shortCode);
+  const response = await fetch(`${baseUrl}/api/links/${target.id}`, { method: 'DELETE' });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { message: 'Link deleted.', id: target.id });
+  assert.equal(model.records.has(target.shortCode), false);
+  assert.ok(unrelated.every((code) => model.records.has(code)));
+
+  const missing = await fetch(`${baseUrl}/api/links/${target.id}`, { method: 'DELETE' });
   assert.equal(missing.status, 404);
 });

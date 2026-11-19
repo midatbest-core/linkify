@@ -31,7 +31,7 @@ Install dependencies with `npm install`, copy `.env.example` to `server/.env`, a
 | `MONGODB_URI` | Server | MongoDB connection string | `mongodb://127.0.0.1:27017/linkify` |
 | `CLIENT_ORIGIN` | Server | Exact allowed browser origin for CORS | `http://localhost:5174` |
 | `SHORT_BASE_URL` | Server | Public base URL for generated links | `http://localhost:5000` |
-| `VITE_API_URL` | Client build | Deployed Express API origin | `http://localhost:5000` in development; required for Vercel builds |
+| `VITE_API_URL` | Client build | API origin; production uses the Vercel same-origin proxy | `http://localhost:5000` in development; set to `https://linkify-3jnh.vercel.app` for Vercel Production only |
 | `ADMIN_USERNAME` | Server | Temporary staging admin login name | unset |
 | `ADMIN_PASSWORD_HASH` | Server | scrypt-encoded admin password | unset |
 | `TRUST_PROXY_HOPS` | Server | Exact number of trusted reverse proxy hops | `0` locally; set explicitly for Render |
@@ -66,11 +66,11 @@ The server uses the maintained `maxmind` Node package with a local MMDB reader. 
 
 DB-IP Lite is licensed under CC BY 4.0 and requires attribution when data is used. The geographic dashboard displays the required [IP Geolocation by DB-IP](https://db-ip.com) link. Keep this attribution on any deployed dashboard that displays geographic analytics.
 
-Set `ADMIN_USERNAME` and `ADMIN_PASSWORD_HASH` on the backend. Generate the hash in a terminal with `npm run hash-admin-password --workspace server`; the password is entered without echo. Store only the printed encoded result in the backend secret manager. Its format is `scrypt$<base64url salt>$<base64url digest>` using a 64-byte scrypt digest. Changing the configured username or hash immediately makes existing sessions fail authentication; users must sign in again. The server stores random opaque sessions in MongoDB by token hash, expires them after eight hours, and sets HttpOnly cookies with `SameSite=Lax; Secure` in production. Use an app and API custom domain under the same site (for example `app.example.com` and `api.example.com`): they remain cross-origin for CORS, but are same-site for cookies. Mutating auth calls require the exact configured frontend Origin. Login is limited to 10 attempts per 15 minutes per client IP. No multi-user registration or billing behavior is included.
+Set `ADMIN_USERNAME` and `ADMIN_PASSWORD_HASH` on the backend. Generate the hash in a terminal with `npm run hash-admin-password --workspace server`; the password is entered without echo. Store only the printed encoded result in the backend secret manager. Its format is `scrypt$<base64url salt>$<base64url digest>` using a 64-byte scrypt digest. Changing the configured username or hash immediately makes existing sessions fail authentication; users must sign in again. The server stores random opaque sessions in MongoDB by token hash, expires them after eight hours, and sets HttpOnly cookies with `SameSite=Lax; Secure` in production. The deployed Vercel app proxies `/api/*` to Render so browser API calls stay same-origin; the cookie remains host-only (no `Domain` attribute). Mutating auth calls require the exact configured frontend Origin. Login is limited to 10 attempts per 15 minutes per client IP. No multi-user registration or billing behavior is included.
 
 ## Deployment configuration (Vercel frontend + Render API)
 
-Use custom domains on the same registrable domain to avoid third-party-cookie blocking while keeping the API cross-origin. Example values below assume `example.com`; replace the domains with your own. Set Vercel's frontend domain to `app.example.com` and Render's backend custom domain to `api.example.com`. Both must serve HTTPS. The production cookie is `SameSite=Lax; Secure`; sibling subdomains are same-site, while exact-origin CORS and Origin checks still apply. The default `*.vercel.app` and `*.onrender.com` domains are different sites, so the production session cookie may be blocked by browser third-party-cookie policies when used together.
+Vercel serves the frontend at `https://linkify-3jnh.vercel.app` and proxies browser API requests to the Render API at `https://linkify-whvp.onrender.com`. The browser sees same-origin `/api/*` requests, so the existing production `SameSite=Lax; Secure` host-only session cookie works without weakening cookie or Origin protections. The proxy is limited to `/api/*`; generated short URLs continue to use the Render domain.
 
 ### Render Web Service
 
@@ -80,14 +80,14 @@ Use custom domains on the same registrable domain to avoid third-party-cookie bl
 - Build Command: `npm ci && npm run prepare-geoip --workspace @linkify/server`.
 - Start Command: `npm start`.
 - Health Check Path: `/api/health`.
-- Add the `api.example.com` custom domain in Render and wait until its TLS certificate is active.
+- Keep the Render public service at `https://linkify-whvp.onrender.com` with its managed TLS certificate.
 - Set these service environment variables (secrets are entered directly into Render; do not place their values in Git):
 
 | Name | Value / guidance |
 | --- | --- |
 | `NODE_ENV` | `production` |
-| `CLIENT_ORIGIN` | `https://app.example.com` (one exact origin, no trailing slash) |
-| `SHORT_BASE_URL` | `https://api.example.com` |
+| `CLIENT_ORIGIN` | `https://linkify-3jnh.vercel.app` (one exact origin, no trailing slash) |
+| `SHORT_BASE_URL` | `https://linkify-whvp.onrender.com` (keeps public short links directly on Render) |
 | `MONGODB_URI` | Secret Atlas connection string for the intended production database; restrict Atlas network access to the deployment as appropriate. |
 | `ADMIN_USERNAME` | Admin login name. |
 | `ADMIN_PASSWORD_HASH` | Output of `npm run hash-admin-password --workspace server`, generated locally; never store the plaintext password. |
@@ -105,8 +105,9 @@ Generate a password hash locally with `npm run hash-admin-password --workspace s
 - Install Command: `npm ci`.
 - Build Command: `npm run build --workspace @linkify/client`.
 - Output Directory: `client/dist`.
-- Add `app.example.com` as the Vercel production domain.
-- Set `VITE_API_URL=https://api.example.com` for Production and any Preview environment you intend to use. This is public browser configuration, never a secret. For previews, use a separately configured backend with the exact preview `CLIENT_ORIGIN`; do not point an untrusted preview at the production admin API.
+- The root `vercel.mjs` is evaluated at build time. It installs the `/api/:path*` rewrite to `https://linkify-whvp.onrender.com/api/:path*` only when Vercel sets `VERCEL_ENV=production`; Preview, Development and unknown environments receive no rewrite. Production API responses use `Cache-Control: no-store` and Vercel rewrite caching is disabled. This keeps Preview deployments from reaching the production admin API even if they use relative `/api/*` requests.
+- Production API origin: `https://linkify-3jnh.vercel.app`.
+- Set `VITE_API_URL=https://linkify-3jnh.vercel.app` for **Production only**. This is public browser configuration, never a secret. Do not set `VITE_API_URL` for Preview. The Vite build rejects a Preview build that inherits this variable; separately, `vercel.mjs` omits all rewrites unless `VERCEL_ENV` is exactly `production`. Preview requests therefore stay on that Preview deployment and cannot be sent to the production backend by the project rewrite. Keep Vercel's system environment variables enabled so `VERCEL_ENV` is present in the build environment. Verify the Preview deployment's `/api/*` paths do not reach Render before sharing that deployment.
 
 ### DB-IP build artifact and updates
 
@@ -114,9 +115,9 @@ The Render build runs `server/scripts/downloadDbIpLite.js`, downloads the pinned
 
 The exact local preparation command is `npm run prepare-geoip --workspace @linkify/server`. A deployment's normal Render build command above runs it automatically before the service starts. Do not configure a Render Secret File or commit the MMDB. A persistent disk is unnecessary for this build-artifact approach.
 
-Production startup checks that `CLIENT_ORIGIN`, `SHORT_BASE_URL`, `MONGODB_URI`, `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, and `GEOIP_DB_PATH` exist, validates the password-hash format and explicit proxy-hop setting, rejects localhost/non-HTTPS public origins, and opens/queries the MMDB before connecting to MongoDB. No secret belongs in Vercel variables except the public `VITE_API_URL`; Atlas/admin credentials belong only in Render's backend environment.
+Production startup checks that `CLIENT_ORIGIN`, `SHORT_BASE_URL`, `MONGODB_URI`, `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, and `GEOIP_DB_PATH` exist, validates the password-hash format and explicit proxy-hop setting, rejects localhost/non-HTTPS public origins, and opens/queries the MMDB before connecting to MongoDB. `VITE_API_URL` is public browser configuration; Atlas/admin credentials belong only in Render's backend environment.
 
-`PORT` is provided by Render. The remaining backend variable names are exactly `NODE_ENV`, `CLIENT_ORIGIN`, `SHORT_BASE_URL`, `MONGODB_URI`, `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `TRUST_PROXY_HOPS`, and `GEOIP_DB_PATH`. The only required Vercel variable is `VITE_API_URL`.
+`PORT` is provided by Render. The remaining backend variable names are exactly `NODE_ENV`, `CLIENT_ORIGIN`, `SHORT_BASE_URL`, `MONGODB_URI`, `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `TRUST_PROXY_HOPS`, and `GEOIP_DB_PATH`. Set Vercel `VITE_API_URL` only for Production; leave it unset for Preview.
 
 ## Atlas and deployment verification checklist
 

@@ -3,6 +3,7 @@ import app from './app.js';
 import { connectDatabase } from './config/database.js';
 import { isValidAdminPasswordHash } from './middleware/adminAuth.js';
 import { validateGeoDatabase } from './services/geoIpService.js';
+import { isCanonicalHttpsOrigin } from './utils/httpOrigin.js';
 
 const port = Number(process.env.PORT ?? 5000);
 
@@ -13,8 +14,8 @@ if (process.env.NODE_ENV === 'production') {
     console.error('Production startup configuration is incomplete. Set required environment variables and an explicit TRUST_PROXY_HOPS value.');
     process.exit(1);
   }
-  if (!process.env.CLIENT_ORIGIN.startsWith('https://') || !process.env.SHORT_BASE_URL.startsWith('https://') || process.env.CLIENT_ORIGIN.includes('localhost') || process.env.SHORT_BASE_URL.includes('localhost')) {
-    console.error('Production CLIENT_ORIGIN and SHORT_BASE_URL must use deployed HTTPS domains.');
+  if (!isCanonicalHttpsOrigin(process.env.CLIENT_ORIGIN) || !process.env.SHORT_BASE_URL.startsWith('https://') || process.env.CLIENT_ORIGIN.includes('localhost') || process.env.SHORT_BASE_URL.includes('localhost')) {
+    console.error('Production CLIENT_ORIGIN must be one canonical HTTPS origin, and SHORT_BASE_URL must use a deployed HTTPS domain.');
     process.exit(1);
   }
 }

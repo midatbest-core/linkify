@@ -40,8 +40,11 @@ function getUrlError(value) {
 
 function BrandMark() {
   return (
-    <span className="grid size-10 place-items-center rounded-[14px] bg-[#429f24] text-white shadow-[0_5px_12px_rgba(66,159,36,0.2)]" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" className="size-[22px]" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M7 17 17 7M7 7h10v10" /></svg>
+    <span className="grid size-9 shrink-0 place-items-center rounded-[13px] bg-[#429f24] text-white shadow-[0_5px_12px_rgba(66,159,36,0.2)] sm:size-10 sm:rounded-[14px]" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" className="size-5 sm:size-[22px]" stroke="currentColor" strokeWidth="1.8">
+        <path strokeLinecap="round" strokeLinejoin="round" d="m9.2 14.8 5.6-5.6" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M7.2 16.8H6a3.8 3.8 0 0 1 0-7.6h4.1a3.8 3.8 0 0 1 3.2 1.8M16.8 7.2H18a3.8 3.8 0 1 1 0 7.6h-4.1a3.8 3.8 0 0 1-3.2-1.8" />
+      </svg>
     </span>
   );
 }
@@ -181,7 +184,7 @@ function MainApp({ onLogout }) {
       <header className="relative mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-5 sm:px-7 sm:py-6 lg:px-10">
         <a className="flex min-w-0 items-center gap-2.5 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#295f22]" href="/" aria-label="Linkify home">
           <BrandMark />
-          <span className="text-xl font-semibold tracking-[-0.04em] sm:text-[22px]">linkify</span>
+          <span className="text-lg font-semibold tracking-[-0.04em] sm:text-[22px]">Linkify</span>
         </a>
         <nav className="flex shrink-0 items-center gap-1 sm:gap-2"><button onClick={() => setView('create')} className={`whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3 sm:text-sm ${view === 'create' ? 'bg-[#e9f5e3] text-[#295f22]' : 'text-[#526052] hover:bg-white'}`}>Create link</button><button onClick={() => setView('dashboard')} className={`whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3 sm:text-sm ${view === 'dashboard' ? 'bg-[#e9f5e3] text-[#295f22]' : 'text-[#526052] hover:bg-white'}`}>Dashboard</button><button onClick={onLogout} className="whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold text-[#526052] hover:bg-white sm:px-3 sm:text-sm">Log out</button></nav>
       </header>

@@ -9,6 +9,7 @@ const clickEventSchema = new mongoose.Schema({
   operatingSystem: { type: String, default: 'unknown' },
   countryName: { type: String, default: null },
   countryCode: { type: String, default: null },
+  cityName: { type: String, default: null },
   region: { type: String, default: null },
   isBot: { type: Boolean, default: false },
 }, { collection: 'clickEvents', versionKey: false });

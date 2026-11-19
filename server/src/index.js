@@ -2,7 +2,6 @@ import 'dotenv/config';
 import app from './app.js';
 import { connectDatabase } from './config/database.js';
 import { isValidAdminPasswordHash } from './middleware/adminAuth.js';
-import { validateGeoDatabase } from './services/geoIpService.js';
 import { isCanonicalHttpsOrigin } from './utils/httpOrigin.js';
 
 const port = Number(process.env.PORT ?? 5000);
@@ -21,7 +20,10 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 try {
-  if (process.env.NODE_ENV === 'production') await validateGeoDatabase(process.env.GEOIP_DB_PATH);
+  if (process.env.NODE_ENV === 'production') {
+    await app.locals.initializeGeoIp();
+    console.info('[geoip] database opened and public-IP sample lookup succeeded.');
+  }
   await connectDatabase();
   app.listen(port, () => console.info(`Linkify API listening on port ${port}.`));
 } catch (error) {

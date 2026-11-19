@@ -39,6 +39,7 @@ export function createApp({ linkModel = Link, clickEventModel = ClickEvent, sess
   });
   const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many login attempts. Try again later.' } });
   const auth = createAdminAuth({ sessionModel, username: adminUsername, passwordHash: adminPasswordHash, clientOrigin, production });
+  app.locals.initializeGeoIp = () => typeof geoLocator.initialize === 'function' ? geoLocator.initialize() : Promise.resolve(true);
 
   app.use(cors({ origin: (requestOrigin, callback) => callback(null, requestOrigin === clientOrigin), credentials: true }));
   app.use(express.json());

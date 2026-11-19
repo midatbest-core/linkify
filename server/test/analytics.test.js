@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createApp } from '../src/app.js';
+import { createGeoLocator } from '../src/services/geoIpService.js';
 import { buildLinkAnalyticsPipeline } from '../src/services/analyticsService.js';
 import { parseDateRange } from '../src/utils/dateRange.js';
 import { classifyClickRequest } from '../src/utils/clickClassification.js';
@@ -10,6 +13,7 @@ import Link from '../src/models/Link.js';
 import { createTestAuth } from './testAuth.js';
 
 const LINK_ID = '64b000000000000000000001';
+const localDbPath = fileURLToPath(new URL('../data/dbip-city-lite-2026-11.mmdb', import.meta.url));
 const link = { _id: LINK_ID, id: LINK_ID, shortCode: 'hello1', originalUrl: 'https://example.com', status: 'active', createdAt: new Date('2025-01-01T00:00:00Z'), title: 'Example', tags: ['docs'] };
 let events;
 let analyticsFailure;
@@ -22,6 +26,7 @@ let auth;
 let adminFetch;
 let observedIp;
 let geoLookupFailure = false;
+let geoLookupResult = { countryName: 'Unknown', countryCode: null, region: null, cityName: null };
 
 const linkModel = {
   async findOne({ shortCode }) { return shortCode === link.shortCode ? link : null; },
@@ -39,7 +44,7 @@ before(async () => {
   events = [];
   loggerMessages = [];
   auth = createTestAuth();
-  appServer = createApp({ linkModel, clickEventModel, ...auth, trustProxyHops: '0', geoLocator: async (ip) => { observedIp = ip; if (geoLookupFailure) throw new Error('simulated local GeoIP reader failure'); return { countryName: 'Unknown', countryCode: null, region: null }; }, logger: { error: (message) => loggerMessages.push(message) } }).listen(0);
+  appServer = createApp({ linkModel, clickEventModel, ...auth, trustProxyHops: '0', geoLocator: async (ip) => { observedIp = ip; if (geoLookupFailure) throw new Error('simulated local GeoIP reader failure'); return geoLookupResult; }, logger: { error: (message) => loggerMessages.push(message) } }).listen(0);
   await new Promise((resolve) => appServer.once('listening', resolve));
   baseUrl = `http://127.0.0.1:${appServer.address().port}`;
   adminFetch = auth.fetch(baseUrl, await auth.login(baseUrl));
@@ -77,6 +82,33 @@ test('records safely when user agent or referrer is absent or malformed', async 
   assert.equal(events.at(-1).deviceType, 'unknown');
 });
 
+test('persists real local MMDB country, city and region without persisting IP or raw user agent', { skip: !existsSync(localDbPath) }, async () => {
+  events = [];
+  const geoApp = createApp({
+    linkModel, clickEventModel, ...auth, trustProxyHops: '1',
+    geoLocator: createGeoLocator({ dbPath: localDbPath, logger: { warn: () => {} } }),
+  });
+  assert.equal(await geoApp.locals.initializeGeoIp(), true);
+  const geoServer = geoApp.listen(0);
+  await new Promise((resolve) => geoServer.once('listening', resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${geoServer.address().port}/${link.shortCode}`, {
+      headers: { 'user-agent': 'Private Test Agent/1.0', 'x-forwarded-for': '203.0.113.99', 'cf-connecting-ip': '8.8.8.8' },
+      redirect: 'manual',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(response.status, 302);
+    assert.equal(events.at(-1).countryName, 'United States');
+    assert.equal(events.at(-1).countryCode, 'US');
+    assert.equal(events.at(-1).cityName, 'Mountain View');
+    assert.equal(events.at(-1).region, 'California');
+    assert.equal(Object.hasOwn(events.at(-1), 'ip'), false);
+    assert.equal(Object.hasOwn(events.at(-1), 'userAgent'), false);
+  } finally {
+    await new Promise((resolve, reject) => geoServer.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test('estimates common bot traffic without fingerprinting', () => {
   const classified = classifyClickRequest({ userAgent: 'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)' });
   assert.equal(classified.isBot, true);
@@ -86,6 +118,9 @@ test('estimates common bot traffic without fingerprinting', () => {
 
 test('analytics and link models declare the query and retention indexes', () => {
   const clickIndexes = ClickEvent.schema.indexes();
+  assert.equal(ClickEvent.schema.path('cityName').instance, 'String');
+  assert.equal(ClickEvent.schema.path('ip'), undefined);
+  assert.equal(ClickEvent.schema.path('userAgent'), undefined);
   assert.ok(clickIndexes.some(([keys]) => keys.linkId === 1 && keys.clickedAt === -1));
   assert.ok(clickIndexes.some(([keys, options]) => keys.clickedAt === 1 && options.expireAfterSeconds === 365 * 24 * 60 * 60));
   assert.ok(Link.schema.indexes().some(([keys]) => keys.createdAt === -1));
@@ -111,10 +146,26 @@ test('management APIs reject anonymous requests while health and redirects stay 
   assert.equal(redirect.status, 302);
 });
 
-test('forwarded IP headers are ignored without a configured trusted proxy', async () => {
+test('GeoIP ignores caller-supplied X-Forwarded-For when the trusted client-IP header is absent', async () => {
   await fetch(`${baseUrl}/${link.shortCode}`, { headers: { 'x-forwarded-for': '8.8.8.8' }, redirect: 'manual' });
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.notEqual(observedIp, '8.8.8.8');
+  assert.equal(observedIp, undefined);
+});
+
+test('GeoIP uses Render and Cloudflare single-address client IP header instead of the X-Forwarded-For chain', async () => {
+  let trustedIp;
+  const proxyApp = createApp({ linkModel, clickEventModel, ...auth, trustProxyHops: '1', geoLocator: async (ip) => { trustedIp = ip; return { countryName: 'Unknown', countryCode: null, region: null, cityName: null }; } });
+  const proxyServer = proxyApp.listen(0);
+  await new Promise((resolve) => proxyServer.once('listening', resolve));
+  try {
+    const proxyUrl = `http://127.0.0.1:${proxyServer.address().port}`;
+    const response = await fetch(`${proxyUrl}/${link.shortCode}`, { headers: { 'x-forwarded-for': '203.0.113.99, 192.0.2.44', 'cf-connecting-ip': '8.8.8.8' }, redirect: 'manual' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(response.status, 302);
+    assert.equal(trustedIp, '8.8.8.8');
+  } finally {
+    await new Promise((resolve, reject) => proxyServer.close((error) => error ? reject(error) : resolve()));
+  }
 });
 
 test('GeoIP lookup failure does not fail a public redirect', async () => {

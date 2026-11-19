@@ -27,6 +27,7 @@ export function buildLinkAnalyticsPipeline(linkId, range, now = new Date()) {
       operatingSystems: [{ $match: selected }, ...groupCount('operatingSystem')],
       referrers: [{ $match: { ...selected, referrer: { $ne: null } } }, ...groupCount('referrer'), { $limit: 10 }],
       countries: [{ $match: selected }, { $group: { _id: { countryCode: { $ifNull: ['$countryCode', 'unknown'] }, countryName: { $ifNull: ['$countryName', 'Unknown'] } }, count: { $sum: 1 } } }, { $sort: { count: -1, '_id.countryName': 1 } }],
+      cities: [{ $match: { ...selected, cityName: { $ne: null } } }, { $group: { _id: { cityName: '$cityName', countryCode: { $ifNull: ['$countryCode', 'unknown'] }, countryName: { $ifNull: ['$countryName', 'Unknown'] } }, count: { $sum: 1 } } }, { $sort: { count: -1, '_id.cityName': 1 } }, { $limit: 20 }],
       regions: [{ $match: { ...selected, region: { $ne: null } } }, { $group: { _id: { countryCode: { $ifNull: ['$countryCode', 'unknown'] }, countryName: { $ifNull: ['$countryName', 'Unknown'] }, region: '$region' }, count: { $sum: 1 } } }, { $sort: { count: -1, '_id.region': 1 } }, { $limit: 20 }],
       bots: [{ $match: selected }, { $group: { _id: '$isBot', count: { $sum: 1 } } }],
     } },
@@ -45,6 +46,7 @@ export function buildOverviewAnalyticsPipeline(range) {
       ],
       devices: groupCount('deviceType'),
       countries: [{ $group: { _id: { countryCode: { $ifNull: ['$countryCode', 'unknown'] }, countryName: { $ifNull: ['$countryName', 'Unknown'] } }, count: { $sum: 1 } } }, { $sort: { count: -1, '_id.countryName': 1 } }],
+      cities: [{ $match: { cityName: { $ne: null } } }, { $group: { _id: { cityName: '$cityName', countryCode: { $ifNull: ['$countryCode', 'unknown'] }, countryName: { $ifNull: ['$countryName', 'Unknown'] } }, count: { $sum: 1 } } }, { $sort: { count: -1, '_id.cityName': 1 } }, { $limit: 20 }],
       regions: [{ $match: { region: { $ne: null } } }, { $group: { _id: { countryCode: { $ifNull: ['$countryCode', 'unknown'] }, countryName: { $ifNull: ['$countryName', 'Unknown'] }, region: '$region' }, count: { $sum: 1 } } }, { $sort: { count: -1, '_id.region': 1 } }, { $limit: 20 }],
       referrers: [{ $match: { referrer: { $ne: null } } }, ...groupCount('referrer'), { $limit: 10 }],
       topLinks: [
@@ -97,6 +99,7 @@ export function formatLinkAnalytics(result, range) {
     operatingSystemBreakdown: keyedCounts(data.operatingSystems),
     topReferrers: (data.referrers ?? []).map(({ _id, count }) => ({ hostname: _id, clicks: count })),
     countries: (data.countries ?? []).map(({ _id, count }) => ({ countryCode: _id.countryCode, countryName: _id.countryName, clicks: count })),
+    cities: (data.cities ?? []).map(({ _id, count }) => ({ ..._id, clicks: count })),
     regions: (data.regions ?? []).map(({ _id, count }) => ({ ..._id, clicks: count })),
     botBreakdown: { bots: bots.true ?? 0, nonBots: bots.false ?? 0, estimated: true },
   };
@@ -110,6 +113,7 @@ export function formatOverviewAnalytics(result, recentLinks = [], range) {
     dailyClicks: fillDailyRange(data.daily, range),
     deviceBreakdown: keyedCounts(data.devices),
     countries: (data.countries ?? []).map(({ _id, count }) => ({ countryCode: _id.countryCode, countryName: _id.countryName, clicks: count })),
+    cities: (data.cities ?? []).map(({ _id, count }) => ({ ..._id, clicks: count })),
     regions: (data.regions ?? []).map(({ _id, count }) => ({ ..._id, clicks: count })),
     topReferrers: (data.referrers ?? []).map(({ _id, count }) => ({ hostname: _id, clicks: count })),
     topLinks: data.topLinks ?? [],

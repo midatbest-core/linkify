@@ -3,7 +3,7 @@ import Link from '../models/Link.js';
 import ClickEvent from '../models/ClickEvent.js';
 import { classifyClickRequest } from '../utils/clickClassification.js';
 
-export function createRedirectRouter({ linkModel = Link, clickEventModel = ClickEvent, logger = console, geoLocator = async () => ({ countryName: 'Unknown', countryCode: null, region: null }) } = {}) {
+export function createRedirectRouter({ linkModel = Link, clickEventModel = ClickEvent, logger = console, geoLocator = async () => ({ countryName: 'Unknown', countryCode: null, region: null, cityName: null }) } = {}) {
   const router = Router();
 
   router.get('/:code', async (request, response, next) => {
@@ -21,7 +21,9 @@ export function createRedirectRouter({ linkModel = Link, clickEventModel = Click
             ...classifyClickRequest({
               userAgent: request.get('user-agent'), referrer: request.get('referer'),
             }),
-            ...await geoLocator(request.ip),
+            // Render's public edge is Cloudflare-backed. Use its single-address
+            // client-IP header instead of trusting a caller-controlled XFF chain.
+            ...await geoLocator(request.get('cf-connecting-ip')),
           })).then((record) => clickEventModel.create({ linkId: link._id, clickedAt: new Date(), ...record })).catch(logAnalyticsFailure);
         } catch (analyticsError) { logAnalyticsFailure(analyticsError); }
       }

@@ -5,6 +5,22 @@ import { createApp } from '../src/app.js';
 function createMemoryLinkModel() {
   const records = new Map();
   const byId = new Map();
+  let lastAggregate;
+  function matches(item, filter) {
+    if (filter.$and && !filter.$and.every((part) => matches(item, part))) return false;
+    if (filter.$or && !filter.$or.some((part) => matches(item, part))) return false;
+    for (const [key, condition] of Object.entries(filter)) {
+      if (key.startsWith('$')) continue;
+      if (key === 'status' && condition && typeof condition === 'object' && '$exists' in condition) {
+        if ((item.status !== undefined) !== condition.$exists) return false;
+      } else if (condition?.$regex) {
+        if (!new RegExp(condition.$regex, condition.$options).test(String(item[key] ?? ''))) return false;
+      } else if (key === 'tags') {
+        if (!item.tags?.includes(condition)) return false;
+      } else if ((item[key] ?? (key === 'status' ? 'active' : undefined)) !== condition) return false;
+    }
+    return true;
+  }
   return {
     records,
     async exists({ shortCode }) {
@@ -25,8 +41,28 @@ function createMemoryLinkModel() {
     async findOne({ shortCode }) {
       return records.get(shortCode) ?? null;
     },
-    find() { return { sort: async () => [...records.values()].reverse() }; },
+    find(filter = {}) {
+      const matched = [...records.values()].filter((item) => matches(item, filter));
+      const query = { sort: () => query, skip: (amount) => { query.offset = amount; return query; }, limit: async (limit = 5) => matched.reverse().slice(query.offset ?? 0, (query.offset ?? 0) + limit) };
+      return query;
+    },
+    async countDocuments(filter = {}) { return [...records.values()].filter((item) => matches(item, filter)).length; },
+    async aggregate(pipeline) {
+      lastAggregate = pipeline;
+      const facet = pipeline.at(-1).$facet;
+      const page = facet.links.find((stage) => '$skip' in stage).$skip;
+      const limit = facet.links.find((stage) => '$limit' in stage).$limit;
+      const rows = [...records.values()].slice(page, page + limit).map((item) => ({ ...item, clickCount: 0 }));
+      return [{ links: rows, metadata: [{ total: records.size }] }];
+    },
+    get lastAggregate() { return lastAggregate; },
     async findById(id) { return byId.get(String(id)) ?? null; },
+    async findByIdAndUpdate(id, update) {
+      const record = byId.get(String(id));
+      if (!record) return null;
+      Object.assign(record, update.$set, { updatedAt: new Date() });
+      return record;
+    },
     async findByIdAndDelete(id) {
       const record = byId.get(String(id));
       if (record) { byId.delete(String(id)); records.delete(record.shortCode); }
@@ -35,13 +71,38 @@ function createMemoryLinkModel() {
   };
 }
 
+function createMemoryClickEventModel({ fail = false } = {}) {
+  const records = [];
+  return {
+    records,
+    collection: { name: 'clickEvents' },
+    async create(event) {
+      if (fail) throw new Error('simulated analytics database failure');
+      const saved = { ...event, clickedAt: event.clickedAt ?? new Date() };
+      records.push(saved);
+      return saved;
+    },
+    async deleteMany({ linkId }) {
+      const before = records.length;
+      for (let index = records.length - 1; index >= 0; index -= 1) if (String(records[index].linkId) === String(linkId)) records.splice(index, 1);
+      return { deletedCount: before - records.length };
+    },
+    async aggregate(pipeline) {
+      if (pipeline[0]?.$match?.linkId) return [{ totals: [{ totalClicks: records.length, clicksToday: records.length, clicksLast7Days: records.length, clicksLast30Days: records.length }], selectedTotal: [{ count: records.length }], daily: [], devices: [], browsers: [], operatingSystems: [], referrers: [], bots: [] }];
+      return [{ totals: [{ count: records.length }], daily: [], devices: [], referrers: [], topLinks: [] }];
+    },
+  };
+}
+
 let server;
 let baseUrl;
 let model;
+let clickEvents;
 
 before(async () => {
   model = createMemoryLinkModel();
-  server = createApp({ linkModel: model }).listen(0);
+  clickEvents = createMemoryClickEventModel();
+  server = createApp({ linkModel: model, clickEventModel: clickEvents }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
@@ -124,6 +185,12 @@ test('lists links and retrieves one link by ID', async () => {
   const detail = await fetch(`${baseUrl}/api/links/${created.id}`);
   assert.equal(detail.status, 200);
   assert.equal((await detail.json()).link.shortCode, created.shortCode);
+  const page = await fetch(`${baseUrl}/api/links?status=active&page=1&limit=1`);
+  const pageBody = await page.json();
+  assert.equal(page.status, 200);
+  assert.equal(pageBody.links.length, 1);
+  assert.ok(pageBody.pagination.total >= 1);
+  assert.equal(pageBody.pagination.limit, 1);
 });
 
 test('returns consistent missing and invalid ID errors', async () => {
@@ -142,8 +209,63 @@ test('deletes only the requested link and reports a nonexistent ID', async () =>
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { message: 'Link deleted.', id: target.id });
   assert.equal(model.records.has(target.shortCode), false);
+  assert.ok(clickEvents.records.every((event) => String(event.linkId) !== target.id));
   assert.ok(unrelated.every((code) => model.records.has(code)));
 
   const missing = await fetch(`${baseUrl}/api/links/${target.id}`, { method: 'DELETE' });
   assert.equal(missing.status, 404);
+});
+
+test('edits link metadata, searches and filters links, and archives/restores redirects', async () => {
+  const response = await fetch(`${baseUrl}/api/links`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ originalUrl: 'https://example.org/promo', customAlias: 'promo-page', title: 'Spring promotion', tags: ['sale', 'spring'] }),
+  });
+  const created = await response.json();
+  const changed = await fetch(`${baseUrl}/api/links/${created.id}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ originalUrl: 'https://example.org/new', title: 'Updated promotion', tags: ['sale', 'new'] }),
+  });
+  assert.equal(changed.status, 200);
+  const updated = (await changed.json()).link;
+  assert.equal(updated.shortCode, 'promo-page');
+  assert.equal(updated.originalUrl, 'https://example.org/new');
+  assert.equal(updated.title, 'Updated promotion');
+  assert.deepEqual(updated.tags, ['sale', 'new']);
+
+  const searched = await fetch(`${baseUrl}/api/links?q=updated%20promotion&tag=new&status=active`);
+  assert.ok((await searched.json()).links.some((item) => item.id === created.id));
+  const byClickCount = await fetch(`${baseUrl}/api/links?sort=clicks&order=desc`);
+  const clickSorted = await byClickCount.json();
+  assert.equal(byClickCount.status, 200);
+  assert.ok(clickSorted.links.every((item) => Number.isInteger(item.clickCount)));
+  assert.deepEqual(model.lastAggregate[0].$match, {});
+
+  const archived = await fetch(`${baseUrl}/api/links/${created.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'archived' }) });
+  assert.equal((await archived.json()).link.status, 'archived');
+  const gone = await fetch(`${baseUrl}/promo-page`, { redirect: 'manual' });
+  assert.equal(gone.status, 410);
+  const archivedFilter = await fetch(`${baseUrl}/api/links?status=archived`);
+  assert.ok((await archivedFilter.json()).links.some((item) => item.id === created.id));
+
+  const restored = await fetch(`${baseUrl}/api/links/${created.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'active' }) });
+  assert.equal((await restored.json()).link.status, 'active');
+  const redirect = await fetch(`${baseUrl}/promo-page`, { redirect: 'manual' });
+  assert.equal(redirect.status, 302);
+  assert.equal(redirect.headers.get('location'), 'https://example.org/new');
+});
+
+test('link creation appends UTM values without replacing existing values or fragments', async () => {
+  const response = await fetch(`${baseUrl}/api/links`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ originalUrl: 'https://example.org/path?utm_source=existing&x=1#section', customAlias: 'utm-example', utm: { utm_source: 'new-source', utm_medium: 'email & social' } }),
+  });
+  const data = await response.json();
+  const destination = new URL(data.originalUrl);
+  assert.equal(response.status, 201);
+  assert.equal(destination.searchParams.get('utm_source'), 'existing');
+  assert.equal(destination.searchParams.get('utm_medium'), 'email & social');
+  assert.equal(destination.searchParams.get('x'), '1');
+  assert.equal(destination.hash, '#section');
+  assert.deepEqual(data.utmConflicts, ['utm_source']);
 });

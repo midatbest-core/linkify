@@ -3,6 +3,7 @@ import AliasSuggestions from '../components/AliasSuggestions.jsx';
 import ShortLinkResult from '../components/ShortLinkResult.jsx';
 import StatusMessage from '../components/StatusMessage.jsx';
 import LinkDashboard from '../components/LinkDashboard.jsx';
+import { UTM_KEYS, buildUtmPreview } from '../utils/utm.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:5000';
 
@@ -51,6 +52,9 @@ function StepIcon({ number }) {
 function App() {
   const [originalUrl, setOriginalUrl] = useState('');
   const [customAlias, setCustomAlias] = useState('');
+  const [title, setTitle] = useState('');
+  const [tags, setTags] = useState('');
+  const [utm, setUtm] = useState({});
   const [urlError, setUrlError] = useState('');
   const [link, setLink] = useState(null);
   const [feedback, setFeedback] = useState(null);
@@ -60,6 +64,7 @@ function App() {
   const [copyState, setCopyState] = useState('idle');
   const [view, setView] = useState('create');
   const aliasRequestId = useRef(0);
+  const utmPreview = buildUtmPreview(originalUrl, utm);
 
   async function checkAlias() {
     const alias = customAlias.trim();
@@ -112,6 +117,9 @@ function App() {
 
     const payload = { originalUrl: originalUrl.trim() };
     if (customAlias.trim()) payload.customAlias = customAlias.trim();
+    if (title.trim()) payload.title = title.trim();
+    if (tags.trim()) payload.tags = tags.split(',').map((value) => value.trim()).filter(Boolean);
+    if (Object.values(utm).some((value) => value.trim())) payload.utm = utm;
 
     try {
       const { response, data } = await requestJson('/api/links', {
@@ -211,6 +219,8 @@ function App() {
                 {originalUrl && <button type="button" onClick={() => updateUrl('')} disabled={isLoading || isChecking} className="ml-2 grid size-8 shrink-0 place-items-center rounded-lg text-[#718071] hover:bg-[#edf3e9] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#295f22] disabled:cursor-not-allowed disabled:opacity-50" aria-label="Clear destination URL">×</button>}
               </div>
               {urlError ? <p id="url-error" className="mt-2 text-sm text-[#922d21]" role="alert">{urlError}</p> : <p id="url-hint" className="mt-2 text-xs leading-5 text-[#718071]">Use a complete URL beginning with http:// or https://</p>}
+              {originalUrl.trim() && <p className="mt-2 break-all rounded-lg bg-[#f5f9f2] p-2 text-xs leading-5 text-[#526052]">Final destination preview: {utmPreview.url || 'Enter a valid HTTP or HTTPS destination URL.'}</p>}
+              {utmPreview.conflicts.length > 0 && <p className="mt-1 text-xs text-[#922d21]">Existing UTM values are preserved and will not be overwritten: {utmPreview.conflicts.join(', ')}.</p>}
             </div>
 
             <div>
@@ -244,6 +254,10 @@ function App() {
               </div>
               <p id="alias-hint" className="mt-2 text-xs leading-5 text-[#718071]">3–40 characters: letters, numbers, and hyphens.</p>
             </div>
+
+            <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm font-semibold">Link title <span className="font-normal text-[#718071]">(optional)</span><input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="Spring launch" className="mt-2 min-h-11 w-full rounded-xl border border-[#dfe8dc] bg-[#fcfdfb] px-3 text-sm font-normal outline-none focus:border-[#429f24]" /></label><label className="text-sm font-semibold">Tags <span className="font-normal text-[#718071]">(optional)</span><input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="newsletter, spring" className="mt-2 min-h-11 w-full rounded-xl border border-[#dfe8dc] bg-[#fcfdfb] px-3 text-sm font-normal outline-none focus:border-[#429f24]" /></label></div>
+
+            <details className="rounded-xl border border-[#e2ebdd] bg-[#fcfdfb] p-3"><summary className="cursor-pointer text-sm font-semibold text-[#295f22]">Add campaign tracking parameters (UTM)</summary><div className="mt-3 grid gap-3 sm:grid-cols-2">{UTM_KEYS.map((key) => <label key={key} className="text-xs font-semibold text-[#526052]">{key}<input value={utm[key] ?? ''} onChange={(e) => setUtm((current) => ({ ...current, [key]: e.target.value }))} maxLength={200} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm font-normal" /></label>)}</div><p className="mt-1 text-xs text-[#718071]">UTM parameters describe attribution labels. They do not verify visits, leads, or sales.</p></details>
 
             <button
               className="inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-[#429f24] px-5 py-3 text-base font-semibold text-white shadow-[0_7px_14px_rgba(66,159,36,0.18)] transition-colors hover:bg-[#347d1d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#295f22] disabled:cursor-wait disabled:bg-[#78b65e] disabled:shadow-none"

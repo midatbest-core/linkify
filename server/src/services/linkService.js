@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { normalizeAndValidateAlias, normalizeAndValidateUrl } from '../utils/validation.js';
+import { appendUtmParameters } from '../utils/utm.js';
 
 const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const RANDOM_CODE_LENGTH = 7;
@@ -44,9 +45,12 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
     return suggestions;
   }
 
-  async function create({ originalUrl, customAlias }) {
+  async function create({ originalUrl, customAlias, utm, title, tags }) {
     const destination = normalizeAndValidateUrl(originalUrl);
     if (destination.error) throw Object.assign(new Error(destination.error), { status: 400 });
+    const { url: finalUrl, conflicts: utmConflicts } = appendUtmParameters(destination.value, utm);
+    const metadata = normalizeLinkMetadata({ title, tags });
+    if (metadata.error) throw Object.assign(new Error(metadata.error), { status: 400 });
 
     let shortCode;
     if (customAlias !== undefined && customAlias !== null && customAlias !== '') {
@@ -54,7 +58,7 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
       if (alias.error) throw Object.assign(new Error(alias.error), { status: 400 });
       shortCode = alias.value;
       try {
-        return await Link.create({ originalUrl: destination.value, shortCode, isCustomAlias: true });
+        return { link: await Link.create({ originalUrl: finalUrl, shortCode, isCustomAlias: true, ...metadata }), utmConflicts };
       } catch (error) {
         if (error?.code !== 11000) throw error;
         throw new AliasConflictError(shortCode, await suggestAliases(shortCode));
@@ -64,13 +68,35 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
     for (let attempt = 0; attempt < RANDOM_CODE_ATTEMPTS; attempt += 1) {
       shortCode = codeGenerator();
       try {
-        return await Link.create({ originalUrl: destination.value, shortCode, isCustomAlias: false });
+        return { link: await Link.create({ originalUrl: finalUrl, shortCode, isCustomAlias: false, ...metadata }), utmConflicts };
       } catch (error) {
         if (error?.code !== 11000) throw error;
       }
     }
 
     throw Object.assign(new Error('Could not allocate a unique short code. Please try again.'), { status: 503 });
+  }
+
+  async function update(id, input = {}) {
+    const allowed = ['originalUrl', 'title', 'tags', 'status'];
+    const keys = Object.keys(input);
+    if (!keys.length || keys.some((key) => !allowed.includes(key))) {
+      throw Object.assign(new Error('Provide one or more supported link fields to update.'), { status: 400 });
+    }
+    const updates = {};
+    if (Object.hasOwn(input, 'originalUrl')) {
+      const destination = normalizeAndValidateUrl(input.originalUrl);
+      if (destination.error) throw Object.assign(new Error(destination.error), { status: 400 });
+      updates.originalUrl = destination.value;
+    }
+    const metadata = normalizeLinkMetadata(input, { partial: true });
+    if (metadata.error) throw Object.assign(new Error(metadata.error), { status: 400 });
+    Object.assign(updates, metadata);
+    if (Object.hasOwn(input, 'status')) {
+      if (!['active', 'archived'].includes(input.status)) throw Object.assign(new Error('Status must be active or archived.'), { status: 400 });
+      updates.status = input.status;
+    }
+    return Link.findByIdAndUpdate(id, { $set: updates }, { new: true, runValidators: true });
   }
 
   async function checkAlias(value) {
@@ -84,5 +110,22 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
     };
   }
 
-  return { create, checkAlias, suggestAliases };
+  return { create, update, checkAlias, suggestAliases };
+}
+
+export function normalizeLinkMetadata({ title, tags } = {}, { partial = false } = {}) {
+  const normalized = {};
+  if (!partial || title !== undefined) {
+    const normalizedTitle = title === undefined || title === null ? '' : typeof title === 'string' ? title.trim() : null;
+    if (normalizedTitle === null || normalizedTitle.length > 120) return { error: 'Title must be a string of up to 120 characters.' };
+    normalized.title = normalizedTitle;
+  }
+  if (!partial || tags !== undefined) {
+    const normalizedTags = tags ?? [];
+    if (!Array.isArray(normalizedTags) || normalizedTags.length > 20 || normalizedTags.some((tag) => typeof tag !== 'string' || tag.trim().length === 0 || tag.trim().length > 40)) {
+      return { error: 'Tags must be up to 20 non-empty strings of at most 40 characters each.' };
+    }
+    normalized.tags = [...new Set(normalizedTags.map((tag) => tag.trim()))];
+  }
+  return normalized;
 }

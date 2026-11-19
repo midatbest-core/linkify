@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react';
 import QrCode from './QrCode.jsx';
 import { DateRange, LinkAnalytics, OverviewAnalytics } from './AnalyticsViews.jsx';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
+async function apiFetch(url, options) {
+  const response = await fetch(url, { credentials: 'include', ...options });
+  if (response.status === 401) window.dispatchEvent(new Event('linkify:unauthorized'));
+  return response;
+}
 const utcToday = () => new Date().toISOString().slice(0, 10);
 function dateDaysAgo(days) { const date = new Date(); date.setUTCDate(date.getUTCDate() - days); return date.toISOString().slice(0, 10); }
 
@@ -36,7 +41,7 @@ export default function LinkDashboard() {
       const params = new URLSearchParams({ q: query, status, sort, order, page: String(page), limit: '50' });
       if (tag.trim()) params.set('tag', tag.trim());
       try {
-        const response = await fetch(`${API_URL}/api/links?${params}`);
+        const response = await apiFetch(`${API_URL}/api/links?${params}`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? 'Could not load links.');
         if (!cancelled) { setLinks(data.links ?? []); setPagination(data.pagination ?? { page, limit: 50, total: data.links?.length ?? 0, totalPages: 1 }); }
@@ -53,7 +58,7 @@ export default function LinkDashboard() {
       setOverviewLoading(true); setOverviewError('');
       const params = new URLSearchParams(range);
       try {
-        const response = await fetch(`${API_URL}/api/analytics/overview?${params}`);
+        const response = await apiFetch(`${API_URL}/api/analytics/overview?${params}`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? 'Could not load overview analytics.');
         if (!cancelled) setOverview(data.analytics);
@@ -71,7 +76,7 @@ export default function LinkDashboard() {
       setAnalyticsLoading(true); setAnalyticsError('');
       const params = new URLSearchParams(range);
       try {
-        const response = await fetch(`${API_URL}/api/links/${encodeURIComponent(expanded)}/analytics?${params}`);
+        const response = await apiFetch(`${API_URL}/api/links/${encodeURIComponent(expanded)}/analytics?${params}`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? 'Could not load link analytics.');
         if (!cancelled) setLinkAnalytics(data.analytics);
@@ -90,7 +95,7 @@ export default function LinkDashboard() {
   async function remove(link) {
     if (!window.confirm(`Delete ${link.shortUrl}? Anyone using this short link will no longer be redirected.`)) return;
     try {
-      const response = await fetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, { method: 'DELETE' });
+      const response = await apiFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, { method: 'DELETE' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Could not delete this link.');
       setLinks((current) => current.filter((item) => item.id !== link.id));
@@ -105,7 +110,7 @@ export default function LinkDashboard() {
   }
   async function saveEdit(link) {
     try {
-      const response = await fetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, {
+      const response = await apiFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ originalUrl: draft.originalUrl, title: draft.title, tags: draft.tags.split(',').map((value) => value.trim()).filter(Boolean) }),
       });
@@ -122,7 +127,7 @@ export default function LinkDashboard() {
   async function toggleArchive(link) {
     const nextStatus = link.status === 'archived' ? 'active' : 'archived';
     try {
-      const response = await fetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: nextStatus }) });
+      const response = await apiFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: nextStatus }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Could not change link status.');
       setLinks((current) => current.map((item) => item.id === link.id ? { ...item, ...data.link } : item));

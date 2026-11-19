@@ -7,6 +7,7 @@ import { classifyClickRequest } from '../src/utils/clickClassification.js';
 import { appendUtmParameters } from '../src/utils/utm.js';
 import ClickEvent from '../src/models/ClickEvent.js';
 import Link from '../src/models/Link.js';
+import { createTestAuth } from './testAuth.js';
 
 const LINK_ID = '64b000000000000000000001';
 const link = { _id: LINK_ID, id: LINK_ID, shortCode: 'hello1', originalUrl: 'https://example.com', status: 'active', createdAt: new Date('2025-01-01T00:00:00Z'), title: 'Example', tags: ['docs'] };
@@ -17,6 +18,10 @@ let appServer;
 let baseUrl;
 let aggregateResult;
 let lastPipeline;
+let auth;
+let adminFetch;
+let observedIp;
+let geoLookupFailure = false;
 
 const linkModel = {
   async findOne({ shortCode }) { return shortCode === link.shortCode ? link : null; },
@@ -33,9 +38,11 @@ const clickEventModel = {
 before(async () => {
   events = [];
   loggerMessages = [];
-  appServer = createApp({ linkModel, clickEventModel, logger: { error: (message) => loggerMessages.push(message) } }).listen(0);
+  auth = createTestAuth();
+  appServer = createApp({ linkModel, clickEventModel, ...auth, trustProxyHops: '0', geoLocator: async (ip) => { observedIp = ip; if (geoLookupFailure) throw new Error('simulated local GeoIP reader failure'); return { countryName: 'Unknown', countryCode: null, region: null }; }, logger: { error: (message) => loggerMessages.push(message) } }).listen(0);
   await new Promise((resolve) => appServer.once('listening', resolve));
   baseUrl = `http://127.0.0.1:${appServer.address().port}`;
+  adminFetch = auth.fetch(baseUrl, await auth.login(baseUrl));
 });
 
 after(() => new Promise((resolve, reject) => appServer.close((error) => error ? reject(error) : resolve())));
@@ -46,6 +53,7 @@ test('records a click, normalized referrer, and estimated request classification
     'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     referer: 'https://news.example/story?reader=private',
   }, redirect: 'manual' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(response.status, 302);
   assert.equal(response.headers.get('location'), link.originalUrl);
   assert.equal(events.at(-1).linkId, LINK_ID);
@@ -54,11 +62,13 @@ test('records a click, normalized referrer, and estimated request classification
   assert.equal(events.at(-1).browser, 'Safari');
   assert.equal(events.at(-1).operatingSystem, 'iOS');
   assert.equal(Object.hasOwn(events.at(-1), 'ip'), false);
+  assert.equal(Object.hasOwn(events.at(-1), 'userAgent'), false);
   assert.equal(loggerMessages.length, 0);
 });
 
 test('records safely when user agent or referrer is absent or malformed', async () => {
   const response = await fetch(`${baseUrl}/${link.shortCode}`, { redirect: 'manual' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(response.status, 302);
   assert.deepEqual(classifyClickRequest({ userAgent: null, referrer: 'not a url' }), {
     referrer: null, deviceType: 'unknown', browser: 'unknown', operatingSystem: 'unknown', isBot: false,
@@ -84,10 +94,72 @@ test('analytics and link models declare the query and retention indexes', () => 
 test('analytics write failure is logged and does not block the redirect', async () => {
   analyticsFailure = true;
   const response = await fetch(`${baseUrl}/${link.shortCode}`, { redirect: 'manual' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   analyticsFailure = false;
   assert.equal(response.status, 302);
   assert.equal(response.headers.get('location'), link.originalUrl);
   assert.match(loggerMessages[0], /analytics.*recording failed/);
+});
+
+test('management APIs reject anonymous requests while health and redirects stay public', async () => {
+  const unauthorized = await fetch(`${baseUrl}/api/links`);
+  assert.equal(unauthorized.status, 401);
+  assert.equal((await unauthorized.json()).code, 'AUTH_REQUIRED');
+  const health = await fetch(`${baseUrl}/api/health`);
+  assert.notEqual(health.status, 401);
+  const redirect = await fetch(`${baseUrl}/${link.shortCode}`, { redirect: 'manual' });
+  assert.equal(redirect.status, 302);
+});
+
+test('forwarded IP headers are ignored without a configured trusted proxy', async () => {
+  await fetch(`${baseUrl}/${link.shortCode}`, { headers: { 'x-forwarded-for': '8.8.8.8' }, redirect: 'manual' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.notEqual(observedIp, '8.8.8.8');
+});
+
+test('GeoIP lookup failure does not fail a public redirect', async () => {
+  geoLookupFailure = true;
+  const response = await fetch(`${baseUrl}/${link.shortCode}`, { redirect: 'manual' });
+  geoLookupFailure = false;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get('location'), link.originalUrl);
+  assert.match(loggerMessages.at(-1), /click recording failed/);
+});
+
+test('login rejects bad passwords, sessions expire, and logout invalidates a session', async () => {
+  const wrong = await fetch(`${baseUrl}/api/auth/login`, { method: 'POST', headers: { origin: 'http://localhost:5174', 'content-type': 'application/json' }, body: JSON.stringify({ username: 'test-admin', password: 'incorrect' }) });
+  assert.equal(wrong.status, 401);
+  const expiryCookie = await auth.login(baseUrl);
+  const session = auth.sessions.at(-1);
+  session.expiresAt = new Date(Date.now() - 1000);
+  const expired = await fetch(`${baseUrl}/api/links`, { headers: { cookie: expiryCookie } });
+  assert.equal(expired.status, 401);
+  const activeCookie = await auth.login(baseUrl);
+  const logout = await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', headers: { origin: 'http://localhost:5174', cookie: activeCookie } });
+  assert.equal(logout.status, 200);
+  const afterLogout = await fetch(`${baseUrl}/api/links`, { headers: { cookie: activeCookie } });
+  assert.equal(afterLogout.status, 401);
+});
+
+test('re-login rotates and invalidates the previous session ID', async () => {
+  const firstCookie = await auth.login(baseUrl);
+  const secondCookie = await auth.login(baseUrl, firstCookie);
+  assert.notEqual(firstCookie, secondCookie);
+  const oldSession = await fetch(`${baseUrl}/api/analytics/overview`, { headers: { cookie: firstCookie } });
+  const newSession = await fetch(`${baseUrl}/api/analytics/overview`, { headers: { cookie: secondCookie } });
+  assert.equal(oldSession.status, 401);
+  assert.equal(newSession.status, 200);
+});
+
+test('mutating management requests reject missing or foreign Origin headers', async () => {
+  const cookie = await auth.login(baseUrl);
+  const foreign = await fetch(`${baseUrl}/api/links`, { method: 'POST', headers: { origin: 'https://attacker.example', cookie, 'content-type': 'application/json' }, body: JSON.stringify({ originalUrl: 'https://example.com' }) });
+  assert.equal(foreign.status, 403);
+  const missing = await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', headers: { cookie } });
+  assert.equal(missing.status, 403);
+  const stillAuthenticated = await fetch(`${baseUrl}/api/analytics/overview`, { headers: { cookie } });
+  assert.equal(stillAuthenticated.status, 200);
 });
 
 test('archived links return 410 and do not add click events', async () => {
@@ -116,7 +188,7 @@ test('link analytics API returns metrics and builds indexed date-group aggregati
     operatingSystems: [{ _id: 'iOS', count: 3 }], referrers: [{ _id: 'news.example', count: 4 }],
     bots: [{ _id: true, count: 1 }, { _id: false, count: 4 }],
   }];
-  const response = await fetch(`${baseUrl}/api/links/${LINK_ID}/analytics?from=2025-03-01&to=2025-03-07`);
+  const response = await adminFetch(`${baseUrl}/api/links/${LINK_ID}/analytics?from=2025-03-01&to=2025-03-07`);
   const data = await response.json();
   assert.equal(response.status, 200);
   assert.equal(data.analytics.totalClicks, 19);
@@ -131,19 +203,19 @@ test('link analytics API returns metrics and builds indexed date-group aggregati
 });
 
 test('analytics endpoints handle invalid IDs, missing links, and malformed date ranges', async () => {
-  const invalid = await fetch(`${baseUrl}/api/links/nope/analytics`);
+  const invalid = await adminFetch(`${baseUrl}/api/links/nope/analytics`);
   assert.equal(invalid.status, 400);
-  const missing = await fetch(`${baseUrl}/api/links/64b000000000000000000099/analytics`);
+  const missing = await adminFetch(`${baseUrl}/api/links/64b000000000000000000099/analytics`);
   assert.equal(missing.status, 404);
-  const badDate = await fetch(`${baseUrl}/api/links/${LINK_ID}/analytics?from=yesterday`);
+  const badDate = await adminFetch(`${baseUrl}/api/links/${LINK_ID}/analytics?from=yesterday`);
   assert.equal(badDate.status, 400);
-  const malformedRange = await fetch(`${baseUrl}/api/analytics/overview?from=2025-02-01&to=2025-01-31`);
+  const malformedRange = await adminFetch(`${baseUrl}/api/analytics/overview?from=2025-02-01&to=2025-01-31`);
   assert.equal(malformedRange.status, 400);
 });
 
 test('overview returns date-bounded summaries, top links, and recent links', async () => {
   aggregateResult = [{ totals: [{ count: 8 }], daily: [{ _id: '2025-03-05', count: 8 }], devices: [{ _id: 'desktop', count: 5 }], referrers: [{ _id: 'newsletter.example', count: 4 }], topLinks: [{ linkId: LINK_ID, shortCode: link.shortCode, clicks: 8 }] }];
-  const response = await fetch(`${baseUrl}/api/analytics/overview?from=2025-03-01&to=2025-03-31`);
+  const response = await adminFetch(`${baseUrl}/api/analytics/overview?from=2025-03-01&to=2025-03-31`);
   const data = await response.json();
   assert.equal(response.status, 200);
   assert.equal(data.analytics.totalClicks, 8);

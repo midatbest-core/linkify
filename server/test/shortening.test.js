@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createApp } from '../src/app.js';
+import { createTestAuth } from './testAuth.js';
 
 function createMemoryLinkModel() {
   const records = new Map();
@@ -98,13 +99,17 @@ let server;
 let baseUrl;
 let model;
 let clickEvents;
+let auth;
+let adminFetch;
 
 before(async () => {
   model = createMemoryLinkModel();
   clickEvents = createMemoryClickEventModel();
-  server = createApp({ linkModel: model, clickEventModel: clickEvents }).listen(0);
+  auth = createTestAuth();
+  server = createApp({ linkModel: model, clickEventModel: clickEvents, ...auth }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
+  adminFetch = auth.fetch(baseUrl, await auth.login(baseUrl));
 });
 
 after(() => new Promise((resolve, reject) => {
@@ -112,7 +117,7 @@ after(() => new Promise((resolve, reject) => {
 }));
 
 test('creates a link with a random short code', async () => {
-  const response = await fetch(`${baseUrl}/api/links`, {
+  const response = await adminFetch(`${baseUrl}/api/links`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ originalUrl: 'https://example.com/a/long/path?from=test' }),
@@ -127,7 +132,7 @@ test('creates a link with a random short code', async () => {
 
 test('rejects invalid and unsupported destination URLs', async () => {
   for (const originalUrl of ['not a url', 'javascript:alert(1)', 'ftp://example.com/file']) {
-    const response = await fetch(`${baseUrl}/api/links`, {
+    const response = await adminFetch(`${baseUrl}/api/links`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ originalUrl }),
@@ -137,7 +142,7 @@ test('rejects invalid and unsupported destination URLs', async () => {
 });
 
 test('creates a valid custom alias and reports alias availability', async () => {
-  const response = await fetch(`${baseUrl}/api/links`, {
+  const response = await adminFetch(`${baseUrl}/api/links`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ originalUrl: 'https://example.org', customAlias: 'Spring-Sale' }),
@@ -146,12 +151,12 @@ test('creates a valid custom alias and reports alias availability', async () => 
 
   assert.equal(response.status, 201);
   assert.equal(body.shortCode, 'spring-sale');
-  const availability = await fetch(`${baseUrl}/api/aliases/spring-sale/availability`);
+  const availability = await adminFetch(`${baseUrl}/api/aliases/spring-sale/availability`);
   assert.deepEqual(await availability.json(), { alias: 'spring-sale', available: false, suggestions: ['spring-sale-26', 'get-spring-sale', 'spring-sale-link', 'use-spring-sale', 'spring-sale-2'] });
 });
 
 test('handles duplicate aliases with database-checked alternatives', async () => {
-  const response = await fetch(`${baseUrl}/api/links`, {
+  const response = await adminFetch(`${baseUrl}/api/links`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ originalUrl: 'https://example.net', customAlias: 'spring-sale' }),
@@ -176,16 +181,16 @@ test('redirects saved codes and returns 404 for unknown codes', async () => {
 
 test('lists links and retrieves one link by ID', async () => {
   const created = [...model.records.values()][0];
-  const list = await fetch(`${baseUrl}/api/links`);
+  const list = await adminFetch(`${baseUrl}/api/links`);
   const body = await list.json();
   assert.equal(list.status, 200);
   assert.ok(Array.isArray(body.links));
   assert.ok(body.links.some((link) => link.id === created.id));
 
-  const detail = await fetch(`${baseUrl}/api/links/${created.id}`);
+  const detail = await adminFetch(`${baseUrl}/api/links/${created.id}`);
   assert.equal(detail.status, 200);
   assert.equal((await detail.json()).link.shortCode, created.shortCode);
-  const page = await fetch(`${baseUrl}/api/links?status=active&page=1&limit=1`);
+  const page = await adminFetch(`${baseUrl}/api/links?status=active&page=1&limit=1`);
   const pageBody = await page.json();
   assert.equal(page.status, 200);
   assert.equal(pageBody.links.length, 1);
@@ -194,10 +199,10 @@ test('lists links and retrieves one link by ID', async () => {
 });
 
 test('returns consistent missing and invalid ID errors', async () => {
-  const invalid = await fetch(`${baseUrl}/api/links/not-an-id`);
+  const invalid = await adminFetch(`${baseUrl}/api/links/not-an-id`);
   assert.equal(invalid.status, 400);
   assert.deepEqual(await invalid.json(), { error: 'Invalid link ID.' });
-  const missing = await fetch(`${baseUrl}/api/links/ffffffffffffffffffffffff`);
+  const missing = await adminFetch(`${baseUrl}/api/links/ffffffffffffffffffffffff`);
   assert.equal(missing.status, 404);
   assert.deepEqual(await missing.json(), { error: 'Link not found.' });
 });
@@ -205,24 +210,24 @@ test('returns consistent missing and invalid ID errors', async () => {
 test('deletes only the requested link and reports a nonexistent ID', async () => {
   const target = [...model.records.values()].find((record) => record.shortCode === 'spring-sale');
   const unrelated = [...model.records.keys()].filter((code) => code !== target.shortCode);
-  const response = await fetch(`${baseUrl}/api/links/${target.id}`, { method: 'DELETE' });
+  const response = await adminFetch(`${baseUrl}/api/links/${target.id}`, { method: 'DELETE' });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { message: 'Link deleted.', id: target.id });
   assert.equal(model.records.has(target.shortCode), false);
   assert.ok(clickEvents.records.every((event) => String(event.linkId) !== target.id));
   assert.ok(unrelated.every((code) => model.records.has(code)));
 
-  const missing = await fetch(`${baseUrl}/api/links/${target.id}`, { method: 'DELETE' });
+  const missing = await adminFetch(`${baseUrl}/api/links/${target.id}`, { method: 'DELETE' });
   assert.equal(missing.status, 404);
 });
 
 test('edits link metadata, searches and filters links, and archives/restores redirects', async () => {
-  const response = await fetch(`${baseUrl}/api/links`, {
+  const response = await adminFetch(`${baseUrl}/api/links`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ originalUrl: 'https://example.org/promo', customAlias: 'promo-page', title: 'Spring promotion', tags: ['sale', 'spring'] }),
   });
   const created = await response.json();
-  const changed = await fetch(`${baseUrl}/api/links/${created.id}`, {
+  const changed = await adminFetch(`${baseUrl}/api/links/${created.id}`, {
     method: 'PATCH', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ originalUrl: 'https://example.org/new', title: 'Updated promotion', tags: ['sale', 'new'] }),
   });
@@ -233,22 +238,22 @@ test('edits link metadata, searches and filters links, and archives/restores red
   assert.equal(updated.title, 'Updated promotion');
   assert.deepEqual(updated.tags, ['sale', 'new']);
 
-  const searched = await fetch(`${baseUrl}/api/links?q=updated%20promotion&tag=new&status=active`);
+  const searched = await adminFetch(`${baseUrl}/api/links?q=updated%20promotion&tag=new&status=active`);
   assert.ok((await searched.json()).links.some((item) => item.id === created.id));
-  const byClickCount = await fetch(`${baseUrl}/api/links?sort=clicks&order=desc`);
+  const byClickCount = await adminFetch(`${baseUrl}/api/links?sort=clicks&order=desc`);
   const clickSorted = await byClickCount.json();
   assert.equal(byClickCount.status, 200);
   assert.ok(clickSorted.links.every((item) => Number.isInteger(item.clickCount)));
   assert.deepEqual(model.lastAggregate[0].$match, {});
 
-  const archived = await fetch(`${baseUrl}/api/links/${created.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'archived' }) });
+  const archived = await adminFetch(`${baseUrl}/api/links/${created.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'archived' }) });
   assert.equal((await archived.json()).link.status, 'archived');
   const gone = await fetch(`${baseUrl}/promo-page`, { redirect: 'manual' });
   assert.equal(gone.status, 410);
-  const archivedFilter = await fetch(`${baseUrl}/api/links?status=archived`);
+  const archivedFilter = await adminFetch(`${baseUrl}/api/links?status=archived`);
   assert.ok((await archivedFilter.json()).links.some((item) => item.id === created.id));
 
-  const restored = await fetch(`${baseUrl}/api/links/${created.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'active' }) });
+  const restored = await adminFetch(`${baseUrl}/api/links/${created.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'active' }) });
   assert.equal((await restored.json()).link.status, 'active');
   const redirect = await fetch(`${baseUrl}/promo-page`, { redirect: 'manual' });
   assert.equal(redirect.status, 302);
@@ -256,7 +261,7 @@ test('edits link metadata, searches and filters links, and archives/restores red
 });
 
 test('link creation appends UTM values without replacing existing values or fragments', async () => {
-  const response = await fetch(`${baseUrl}/api/links`, {
+  const response = await adminFetch(`${baseUrl}/api/links`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ originalUrl: 'https://example.org/path?utm_source=existing&x=1#section', customAlias: 'utm-example', utm: { utm_source: 'new-source', utm_medium: 'email & social' } }),
   });

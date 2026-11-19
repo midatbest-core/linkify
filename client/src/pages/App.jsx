@@ -1,19 +1,20 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import AliasSuggestions from '../components/AliasSuggestions.jsx';
 import ShortLinkResult from '../components/ShortLinkResult.jsx';
 import StatusMessage from '../components/StatusMessage.jsx';
 import LinkDashboard from '../components/LinkDashboard.jsx';
 import { UTM_KEYS, buildUtmPreview } from '../utils/utm.js';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
 
 async function requestJson(path, options) {
   let response;
   try {
-    response = await fetch(`${API_URL}${path}`, options);
+    response = await fetch(`${API_URL}${path}`, { credentials: 'include', ...options });
   } catch {
     throw new Error('Could not reach Linkify. Check your connection and try again.');
   }
+  if (response.status === 401 && path !== '/api/auth/login') window.dispatchEvent(new Event('linkify:unauthorized'));
 
   let data;
   try {
@@ -49,7 +50,7 @@ function StepIcon({ number }) {
   return <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#e9f5e3] text-sm font-semibold text-[#295f22]">{number}</span>;
 }
 
-function App() {
+function MainApp({ onLogout }) {
   const [originalUrl, setOriginalUrl] = useState('');
   const [customAlias, setCustomAlias] = useState('');
   const [title, setTitle] = useState('');
@@ -182,7 +183,7 @@ function App() {
           <BrandMark />
           <span className="text-xl font-semibold tracking-[-0.04em] sm:text-[22px]">linkify</span>
         </a>
-        <nav className="flex shrink-0 items-center gap-1 sm:gap-2"><button onClick={() => setView('create')} className={`whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3 sm:text-sm ${view === 'create' ? 'bg-[#e9f5e3] text-[#295f22]' : 'text-[#526052] hover:bg-white'}`}>Create link</button><button onClick={() => setView('dashboard')} className={`whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3 sm:text-sm ${view === 'dashboard' ? 'bg-[#e9f5e3] text-[#295f22]' : 'text-[#526052] hover:bg-white'}`}>Dashboard</button></nav>
+        <nav className="flex shrink-0 items-center gap-1 sm:gap-2"><button onClick={() => setView('create')} className={`whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3 sm:text-sm ${view === 'create' ? 'bg-[#e9f5e3] text-[#295f22]' : 'text-[#526052] hover:bg-white'}`}>Create link</button><button onClick={() => setView('dashboard')} className={`whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3 sm:text-sm ${view === 'dashboard' ? 'bg-[#e9f5e3] text-[#295f22]' : 'text-[#526052] hover:bg-white'}`}>Dashboard</button><button onClick={onLogout} className="whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold text-[#526052] hover:bg-white sm:px-3 sm:text-sm">Log out</button></nav>
       </header>
 
       {view === 'dashboard' ? <LinkDashboard /> : <section className="relative mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-10 px-4 pb-16 pt-9 sm:px-7 sm:pb-20 sm:pt-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(300px,0.75fr)] lg:gap-20 lg:px-10 lg:pb-24 lg:pt-16">
@@ -314,6 +315,39 @@ function App() {
       <footer className="relative border-t border-[#e8eee5] bg-white/45 px-4 py-5 text-center text-xs text-[#718071] sm:px-6 sm:py-6 sm:text-sm">Linkify <span className="mx-1 text-[#a0aa9f]">·</span> A clearer way to share links.</footer>
     </main>
   );
+}
+
+function AdminLogin({ onLogin }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  async function submit(event) {
+    event.preventDefault(); setLoading(true); setError('');
+    try {
+      const { response, data } = await requestJson('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+      if (!response.ok) throw new Error(data.error ?? 'Login failed.');
+      onLogin(data.username);
+    } catch (loginError) { setError(loginError.message); }
+    finally { setLoading(false); }
+  }
+  return <main className="grid min-h-screen place-items-center bg-[#fbfef9] px-4"><form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-[#e2ebdd] bg-white p-6 shadow-lg"><h1 className="text-2xl font-semibold">Linkify staging sign in</h1><label className="block text-sm font-semibold">Username<input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-[#dfe8dc] px-3 font-normal" /></label><label className="block text-sm font-semibold">Password<input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-[#dfe8dc] px-3 font-normal" /></label>{error && <p role="alert" className="text-sm text-[#922d21]">{error}</p>}<button disabled={loading} className="min-h-11 w-full rounded-lg bg-[#429f24] font-semibold text-white disabled:opacity-60">{loading ? 'Signing in…' : 'Sign in'}</button></form></main>;
+}
+
+function App() {
+  const [authState, setAuthState] = useState('loading');
+  useEffect(() => {
+    fetch(`${API_URL}/api/auth/session`, { credentials: 'include' }).then((response) => response.json()).then((data) => setAuthState(data.authenticated ? 'authenticated' : 'anonymous')).catch(() => setAuthState('anonymous'));
+    const onUnauthorized = () => setAuthState('anonymous');
+    window.addEventListener('linkify:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('linkify:unauthorized', onUnauthorized);
+  }, []);
+  async function logout() {
+    await fetch(`${API_URL}/api/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
+    setAuthState('anonymous');
+  }
+  if (authState === 'loading') return <main className="grid min-h-screen place-items-center text-sm text-[#526052]">Checking session…</main>;
+  return authState === 'authenticated' ? <MainApp onLogout={logout} /> : <AdminLogin onLogin={() => setAuthState('authenticated')} />;
 }
 
 export default App;

@@ -32,6 +32,20 @@ export function Breakdown({ title, data }) {
   </div>;
 }
 
+export function CountryBreakdown({ countries = [], regions = [] }) {
+  const total = countries.reduce((sum, country) => sum + country.clicks, 0);
+  const max = Math.max(1, ...countries.map((country) => country.clicks));
+  return <section className="rounded-xl border border-[#e2ebdd] bg-white p-4" aria-label="Geographic analytics">
+    <h3 className="text-sm font-semibold text-[#295f22]">Clicks by country</h3>
+    {countries.length ? <ol className="mt-3 space-y-3">{countries.slice(0, 10).map((country) => <li key={country.countryCode ?? 'unknown'}>
+      <div className="flex justify-between gap-3 text-sm"><span className="truncate text-[#526052]">{country.countryName}{country.countryCode ? <span className="ml-1 text-xs text-[#718071]">({country.countryCode})</span> : null}</span><span className="shrink-0 font-semibold">{country.clicks} <span className="font-normal text-[#718071]">({total ? Math.round(country.clicks / total * 100) : 0}%)</span></span></div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#edf3e9]"><div className="h-full rounded-full bg-[#429f24]" style={{ width: `${Math.max(2, country.clicks / max * 100)}%` }} /></div>
+    </li>)}</ol> : <p className="mt-3 text-sm text-[#718071]">No geographic data in this date range.</p>}
+    {regions.length > 0 && <div className="mt-4 border-t border-[#e2ebdd] pt-3"><h4 className="text-xs font-semibold text-[#526052]">Regions with available data</h4><ul className="mt-2 space-y-1">{regions.slice(0, 8).map((region) => <li key={`${region.countryCode}-${region.region}`} className="flex justify-between gap-3 text-xs text-[#718071]"><span className="truncate">{region.region}, {region.countryName}</span><span>{region.clicks}</span></li>)}</ul></div>}
+    <p className="mt-3 text-[11px] leading-4 text-[#718071]">Approximate network location from GeoIP data; it may be missing or incorrect. <a className="underline underline-offset-2" href="https://db-ip.com" target="_blank" rel="noreferrer">IP Geolocation by DB-IP</a></p>
+  </section>;
+}
+
 export function DateRange({ from, to, onChange }) {
   return <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#e2ebdd] bg-white p-3">
     <label className="text-xs font-semibold text-[#526052]">From (UTC)<input type="date" value={from} max={to} onChange={(e) => onChange('from', e.target.value)} className="mt-1 block min-h-10 rounded-lg border border-[#dfe8dc] px-2 text-sm font-normal text-[#08160e]" /></label>
@@ -53,6 +67,7 @@ export function OverviewAnalytics({ analytics, loading, error }) {
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{summary.map(([label, value]) => <div key={label} className="rounded-xl border border-[#e2ebdd] bg-white p-4"><p className="text-xs font-medium text-[#718071]">{label}</p><p className="mt-1 break-words text-xl font-semibold text-[#08160e]">{value}</p></div>)}</div>
     <DailyChart rows={analytics?.dailyClicks} title="Clicks over selected dates" />
     <div className="grid gap-3 md:grid-cols-2"><Breakdown title="Devices" data={analytics?.deviceBreakdown} /><Breakdown title="Top referrers" data={Object.fromEntries((analytics?.topReferrers ?? []).map((item) => [item.hostname, item.clicks]))} /></div>
+    <CountryBreakdown countries={analytics?.countries} regions={analytics?.regions} />
     <div className="grid gap-3 md:grid-cols-2"><div className="rounded-xl border border-[#e2ebdd] bg-white p-4"><h3 className="text-sm font-semibold text-[#295f22]">Top-performing links</h3>{analytics?.topLinks?.length ? <ol className="mt-3 space-y-2">{analytics.topLinks.slice(0, 5).map((link) => <li key={link.linkId} className="flex justify-between gap-3 text-sm"><span className="truncate">{link.title || link.shortCode}</span><strong>{link.clicks}</strong></li>)}</ol> : <p className="mt-3 text-sm text-[#718071]">No clicks recorded for this date range.</p>}</div>
       <div className="rounded-xl border border-[#e2ebdd] bg-white p-4"><h3 className="text-sm font-semibold text-[#295f22]">Recently created links</h3>{analytics?.recentlyCreatedLinks?.length ? <ol className="mt-3 space-y-2">{analytics.recentlyCreatedLinks.slice(0, 5).map((link) => <li key={link.id} className="flex justify-between gap-3 text-sm"><span className="truncate">{link.title || link.shortCode}</span><time className="shrink-0 text-xs text-[#718071]">{link.createdAt ? new Date(link.createdAt).toLocaleDateString() : ''}</time></li>)}</ol> : <p className="mt-3 text-sm text-[#718071]">No links created yet.</p>}</div></div>
     <p className="text-xs leading-5 text-[#718071]">Click counts are redirect requests, not unique visitors or conversions. Device, browser, OS and bot categories are estimates. Referrers are hostnames only.</p>
@@ -73,6 +88,7 @@ export function LinkAnalytics({ analytics, loading, error }) {
   return <div className="mt-4 space-y-3 border-t border-[#e2ebdd] pt-4">
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">{metricCards.map(([label, value]) => <div key={label} className="rounded-lg bg-[#f5f9f2] p-3"><p className="text-[11px] text-[#718071]">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></div>)}</div>
     <DailyChart rows={analytics.dailyClicks} />
+    <CountryBreakdown countries={analytics.countries} regions={analytics.regions} />
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><Breakdown title="Devices" data={analytics.deviceBreakdown} /><Breakdown title="Browsers" data={analytics.browserBreakdown} /><Breakdown title="Operating systems" data={analytics.operatingSystemBreakdown} /><Breakdown title="Top referrers" data={Object.fromEntries(analytics.topReferrers.map((item) => [item.hostname, item.clicks]))} /><Breakdown title="Bot estimate" data={{ bots: analytics.botBreakdown.bots, 'non-bots': analytics.botBreakdown.nonBots }} /></div>
   </div>;
 }

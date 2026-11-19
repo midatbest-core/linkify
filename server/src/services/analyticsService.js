@@ -26,6 +26,8 @@ export function buildLinkAnalyticsPipeline(linkId, range, now = new Date()) {
       browsers: [{ $match: selected }, ...groupCount('browser')],
       operatingSystems: [{ $match: selected }, ...groupCount('operatingSystem')],
       referrers: [{ $match: { ...selected, referrer: { $ne: null } } }, ...groupCount('referrer'), { $limit: 10 }],
+      countries: [{ $match: selected }, { $group: { _id: { countryCode: { $ifNull: ['$countryCode', 'unknown'] }, countryName: { $ifNull: ['$countryName', 'Unknown'] } }, count: { $sum: 1 } } }, { $sort: { count: -1, '_id.countryName': 1 } }],
+      regions: [{ $match: { ...selected, region: { $ne: null } } }, { $group: { _id: { countryCode: { $ifNull: ['$countryCode', 'unknown'] }, countryName: { $ifNull: ['$countryName', 'Unknown'] }, region: '$region' }, count: { $sum: 1 } } }, { $sort: { count: -1, '_id.region': 1 } }, { $limit: 20 }],
       bots: [{ $match: selected }, { $group: { _id: '$isBot', count: { $sum: 1 } } }],
     } },
   ];
@@ -42,6 +44,8 @@ export function buildOverviewAnalyticsPipeline(range) {
         { $sort: { _id: 1 } },
       ],
       devices: groupCount('deviceType'),
+      countries: [{ $group: { _id: { countryCode: { $ifNull: ['$countryCode', 'unknown'] }, countryName: { $ifNull: ['$countryName', 'Unknown'] } }, count: { $sum: 1 } } }, { $sort: { count: -1, '_id.countryName': 1 } }],
+      regions: [{ $match: { region: { $ne: null } } }, { $group: { _id: { countryCode: { $ifNull: ['$countryCode', 'unknown'] }, countryName: { $ifNull: ['$countryName', 'Unknown'] }, region: '$region' }, count: { $sum: 1 } } }, { $sort: { count: -1, '_id.region': 1 } }, { $limit: 20 }],
       referrers: [{ $match: { referrer: { $ne: null } } }, ...groupCount('referrer'), { $limit: 10 }],
       topLinks: [
         { $group: { _id: '$linkId', clicks: { $sum: 1 } } },
@@ -92,6 +96,8 @@ export function formatLinkAnalytics(result, range) {
     browserBreakdown: keyedCounts(data.browsers),
     operatingSystemBreakdown: keyedCounts(data.operatingSystems),
     topReferrers: (data.referrers ?? []).map(({ _id, count }) => ({ hostname: _id, clicks: count })),
+    countries: (data.countries ?? []).map(({ _id, count }) => ({ countryCode: _id.countryCode, countryName: _id.countryName, clicks: count })),
+    regions: (data.regions ?? []).map(({ _id, count }) => ({ ..._id, clicks: count })),
     botBreakdown: { bots: bots.true ?? 0, nonBots: bots.false ?? 0, estimated: true },
   };
 }
@@ -103,6 +109,8 @@ export function formatOverviewAnalytics(result, recentLinks = [], range) {
     totalClicks: data.totals?.[0]?.count ?? 0,
     dailyClicks: fillDailyRange(data.daily, range),
     deviceBreakdown: keyedCounts(data.devices),
+    countries: (data.countries ?? []).map(({ _id, count }) => ({ countryCode: _id.countryCode, countryName: _id.countryName, clicks: count })),
+    regions: (data.regions ?? []).map(({ _id, count }) => ({ ..._id, clicks: count })),
     topReferrers: (data.referrers ?? []).map(({ _id, count }) => ({ hostname: _id, clicks: count })),
     topLinks: data.topLinks ?? [],
     recentlyCreatedLinks: recentLinks,

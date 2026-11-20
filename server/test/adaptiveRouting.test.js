@@ -236,6 +236,24 @@ test('redirects choose UA-derived device destinations and record exactly one att
   assert.equal(models.events.at(-1).selectedDestinationId, 'default');
 });
 
+test('authenticated routing simulation reuses rule priority without writing click analytics', async () => {
+  const link = models.links.get('adaptive-link');
+  link.adaptiveRouting = normalizeAdaptiveRouting(routing).value;
+  const before = models.events.length;
+  const body = { deviceType: 'mobile', countryCode: 'unknown', now: new Date().toISOString(), query: {} };
+  const unauthorized = await fetch(`${api}/api/links/${link._id}/simulate`, { method: 'POST', headers: { origin: 'http://localhost:5174', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  assert.equal(unauthorized.status, 401);
+  const response = await fetch(`${api}/api/links/${link._id}/simulate`, { method: 'POST', headers: { cookie, origin: 'http://localhost:5174', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  assert.equal(response.status, 200);
+  const result = (await response.json()).simulation;
+  assert.equal(result.matchedRule.ruleId, 'mobile-first');
+  assert.equal(result.destinationUrl, 'https://example.com/mobile');
+  assert.equal(result.note.includes('does not record a click'), true);
+  assert.equal(models.events.length, before);
+  const invalid = await fetch(`${api}/api/links/${link._id}/simulate`, { method: 'POST', headers: { cookie, origin: 'http://localhost:5174', 'content-type': 'application/json' }, body: JSON.stringify({ ...body, deviceType: 'smart-tv' }) });
+  assert.equal(invalid.status, 400);
+});
+
 test('Express redirects use trusted GeoIP plus explicit case-sensitive UTM query values and safely fall back', async () => {
   const link = models.links.get('adaptive-link');
   const now = new Date();

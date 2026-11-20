@@ -3,6 +3,7 @@ import Link from '../models/Link.js';
 import { createLinkService, AliasConflictError } from '../services/linkService.js';
 import mongoose from 'mongoose';
 import ClickEvent from '../models/ClickEvent.js';
+import { resolveAdaptiveDestination } from '../services/adaptiveRoutingService.js';
 
 function serializeLink(link, baseUrl) {
   const isCustomAlias = link.isCustomAlias ?? !/^[0-9a-zA-Z]{7}$/.test(link.shortCode);
@@ -92,6 +93,35 @@ export function createLinksRouter({ linkModel = Link, clickEventModel = ClickEve
       if (!link) return response.status(404).json({ error: 'Link not found.' });
       const baseUrl = (process.env.SHORT_BASE_URL ?? `${request.protocol}://${request.get('host')}`).replace(/\/$/, '');
       response.json({ link: serializeLink(link, baseUrl) });
+    } catch (error) { next(error); }
+  });
+
+  router.post('/:id/simulate', async (request, response, next) => {
+    if (!mongoose.isObjectIdOrHexString(request.params.id)) return response.status(400).json({ error: 'Invalid link ID.' });
+    const input = request.body ?? {};
+    const deviceType = input.deviceType ?? 'unknown';
+    const countryCode = input.countryCode === 'unknown' ? null : input.countryCode ?? null;
+    const allowedDevices = new Set(['mobile', 'desktop', 'tablet', 'unknown']);
+    if (!allowedDevices.has(deviceType)) return response.status(400).json({ error: 'Device must be mobile, desktop, tablet, or unknown.' });
+    if (countryCode !== null && (typeof countryCode !== 'string' || !/^[A-Z]{2}$/.test(countryCode))) return response.status(400).json({ error: 'Country must be Unknown or a two-letter uppercase country code.' });
+    const now = input.now === undefined ? new Date() : new Date(input.now);
+    if (!Number.isFinite(now.getTime())) return response.status(400).json({ error: 'Simulation time must be a valid date.' });
+    const query = input.query ?? {};
+    const allowedQueryKeys = new Set(['utm_source', 'utm_medium', 'utm_campaign']);
+    if (!query || typeof query !== 'object' || Array.isArray(query) || Object.keys(query).some((key) => !allowedQueryKeys.has(key) || typeof query[key] !== 'string' || query[key].length > 100)) {
+      return response.status(400).json({ error: 'UTM conditions must be strings of at most 100 characters.' });
+    }
+    try {
+      const link = await linkModel.findById(request.params.id);
+      if (!link) return response.status(404).json({ error: 'Link not found.' });
+      const result = resolveAdaptiveDestination(link, { deviceType, countryCode, query, now });
+      const rule = result.matchedRuleId && link.adaptiveRouting?.rules?.find((entry) => entry.ruleId === result.matchedRuleId);
+      response.json({ simulation: {
+        ...result,
+        matchedRule: rule ? { ruleId: rule.ruleId, priority: rule.priority, destinationUrl: rule.destinationUrl } : null,
+        fallbackReason: result.usedFallback ? 'No enabled rule matched the supplied conditions; the default destination was selected.' : null,
+        note: 'Simulation only. This does not represent a real visitor lookup and does not record a click.',
+      } });
     } catch (error) { next(error); }
   });
 

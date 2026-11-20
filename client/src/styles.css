@@ -1,29 +1,80 @@
 @import "tailwindcss";
 
+@theme {
+  --color-canvas: #f7f6f1;
+  --color-canvas-subtle: #f1f0e9;
+  --color-surface: #fffefa;
+  --color-ink: #19241d;
+  --color-muted: #626e64;
+  --color-line: #e4e5dc;
+  --color-brand: #2f7130;
+  --color-brand-strong: #245b2b;
+  --color-brand-soft: #e5f0e0;
+  --color-danger: #a84637;
+}
+
 :root {
   color-scheme: light;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #08160e;
-  background: #fbfef9;
+  color: #19241d;
+  background: #f7f6f1;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
 }
 
 * { box-sizing: border-box; }
-
 html { min-width: 320px; scroll-behavior: smooth; }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
-button, input { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
-::selection { color: #08160e; background: #b9e6a2; }
+button:enabled { cursor: pointer; }
+::selection { color: #19241d; background: #cfe3c6; }
+[class~="text-[#718071]"] { color: var(--color-muted); }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
+.app-shell { min-height: 100vh; background: #f7f6f1; }
+.app-topbar { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid rgba(228,229,220,.9); background: rgba(255,254,250,.94); backdrop-filter: blur(12px); }
+.app-topbar > div { padding-top: max(0px, env(safe-area-inset-top)); }
+.brand-mark { display: grid; width: 38px; height: 38px; flex: none; place-items: center; border-radius: 13px; color: white; background: #367c36; box-shadow: 0 5px 12px rgba(54,124,54,.2); }
+.nav-pill { min-height: 42px; border-radius: 999px; padding: 0 12px; color: #626e64; font-size: .875rem; font-weight: 650; white-space: nowrap; transition: background .16s ease, color .16s ease, transform .16s ease; }
+.nav-pill:hover { color: #19241d; background: #f1f0e9; }
+.nav-pill[aria-current="page"] { color: #245b2b; background: #e5f0e0; }
+.button-primary,.button-secondary,.button-quiet,.button-danger,.icon-button { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; border-radius: 12px; font-size: .875rem; font-weight: 650; transition: transform .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease; }
+.button-primary { min-height: 46px; padding: 0 18px; color: white; background: #367c36; box-shadow: 0 6px 14px rgba(54,124,54,.16); }
+.button-primary:hover { background: #2c6b30; box-shadow: 0 8px 18px rgba(54,124,54,.2); transform: translateY(-1px); }
+.button-primary:active,.button-secondary:active,.button-quiet:active,.button-danger:active { transform: translateY(1px); }
+.button-secondary { min-height: 42px; padding: 0 14px; border: 1px solid #daddd2; color: #245b2b; background: #fffefa; }
+.button-secondary:hover,.button-quiet:hover { border-color: #b8c9b0; background: #f1f5ed; }
+.button-quiet { min-height: 38px; padding: 0 10px; color: #46564a; }
+.button-danger { border: 1px solid #efd5cf; color: #a84637; background: #fffefa; }
+.button-danger:hover { background: #fff4f0; }
+.button-primary:focus-visible,.button-secondary:focus-visible,.button-quiet:focus-visible,.button-danger:focus-visible,.icon-button:focus-visible,.nav-pill:focus-visible,.field-control:focus-visible,summary:focus-visible { outline: 3px solid rgba(54,124,54,.3); outline-offset: 2px; }
+.icon-button { width: 40px; height: 40px; border: 1px solid #e4e5dc; color: #46564a; background: #fffefa; font-size: 1rem; }
+.icon-button:hover:not(:disabled) { background: #f1f5ed; }
+.icon-button:disabled { opacity: .38; cursor: not-allowed; }
+.field-control { display: block; width: 100%; min-height: 44px; margin-top: 6px; border: 1px solid #dedfd6; border-radius: 10px; padding: 0 11px; color: #19241d; background: #fffefa; font-size: .875rem; font-weight: 450; outline: none; transition: border-color .16s ease, box-shadow .16s ease; }
+.field-control:focus { border-color: #6c9e68; box-shadow: 0 0 0 3px rgba(54,124,54,.12); }
+.panel { border: 1px solid #e4e5dc; border-radius: 20px; background: #fffefa; box-shadow: 0 8px 30px -28px rgba(25,36,29,.4); }
+.eyebrow { color: #626e64; font-size: .68rem; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+.rule-card { overflow: hidden; border: 1px solid #e4e5dc; border-radius: 16px; background: #fffefa; transition: border-color .18s ease, box-shadow .18s ease; }
+.rule-card:hover { border-color: #cbd6c7; box-shadow: 0 8px 20px -18px rgba(25,36,29,.55); }
+.chart-bar { transform-box: fill-box; transform-origin: center bottom; transition: opacity .2s ease, transform .2s ease; }
+.chart-bar:hover { opacity: 1; transform: scaleY(1.04); }
+.rule-disabled { background: #f8f7f2; }
+.priority-pill { display: grid; width: 35px; height: 35px; flex: none; place-items: center; border-radius: 11px; color: #245b2b; background: #e5f0e0; font-size: .75rem; font-weight: 750; }
+.status-pill { border-radius: 999px; padding: 5px 9px; font-size: .7rem; font-weight: 700; }
+.status-on { color: #245b2b; background: #e5f0e0; }
+.status-off { color: #6d786f; background: #ecece6; }
+.skeleton { position: relative; overflow: hidden; background: #edeee7; }
+.skeleton::after { position: absolute; inset: 0; content: ""; transform: translateX(-100%); background: linear-gradient(90deg,transparent,rgba(255,255,255,.65),transparent); animation: shimmer 1.4s infinite; }
+@keyframes shimmer { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+@media (max-width: 360px) {
+  .app-topbar > div { gap: .5rem; padding-right: 8px; padding-left: 8px; }
+  .app-topbar > div > a > span:last-child { font-size: .875rem; }
+  .app-topbar nav { gap: 0; }
+  .nav-pill { padding-right: 6px; padding-left: 6px; font-size: .72rem; }
 }
+@supports (padding: max(0px)) { .safe-bottom { padding-bottom: max(1rem, env(safe-area-inset-bottom)); } }

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import AdaptiveRuleEditor, { createAdaptiveRule } from '../components/AdaptiveRuleEditor.jsx';
 import AliasSuggestions from '../components/AliasSuggestions.jsx';
+import LinkDashboard from '../components/LinkDashboard.jsx';
 import ShortLinkResult from '../components/ShortLinkResult.jsx';
 import StatusMessage from '../components/StatusMessage.jsx';
-import LinkDashboard from '../components/LinkDashboard.jsx';
-import AdaptiveRuleEditor, { createAdaptiveRule } from '../components/AdaptiveRuleEditor.jsx';
 import { UTM_KEYS, buildUtmPreview } from '../utils/utm.js';
 import { firstInvalidAdaptiveRule, serializeAdaptiveRule } from '../utils/adaptiveRoutingValidation.js';
 
@@ -11,51 +11,33 @@ const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://l
 
 async function requestJson(path, options) {
   let response;
-  try {
-    response = await fetch(`${API_URL}${path}`, { credentials: 'include', ...options });
-  } catch {
-    throw new Error('Could not reach Linkify. Check your connection and try again.');
-  }
+  try { response = await fetch(`${API_URL}${path}`, { credentials: 'include', ...options }); }
+  catch { throw new Error('Could not reach Linkify. Check your connection and try again.'); }
   if (response.status === 401 && path !== '/api/auth/login') window.dispatchEvent(new Event('linkify:unauthorized'));
-
   let data;
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error('Linkify returned an unexpected response. Please try again.');
-  }
+  try { data = await response.json(); } catch { throw new Error('Linkify returned an unexpected response. Please try again.'); }
   return { response, data };
 }
 
 function getUrlError(value) {
   if (!value.trim()) return 'Enter the destination URL you want to shorten.';
-  try {
-    const url = new URL(value.trim());
-    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) {
-      return 'Use a valid web address beginning with http:// or https://.';
-    }
-  } catch {
-    return 'Enter a valid web address beginning with http:// or https://.';
-  }
+  try { const url = new URL(value.trim()); if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) return 'Use a valid web address beginning with http:// or https://.'; }
+  catch { return 'Enter a valid web address beginning with http:// or https://.'; }
   return '';
 }
 
 function BrandMark() {
-  return (
-    <span className="grid size-9 shrink-0 place-items-center rounded-[13px] bg-[#429f24] text-white shadow-[0_5px_12px_rgba(66,159,36,0.2)] sm:size-10 sm:rounded-[14px]" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" className="size-5 sm:size-[22px]" stroke="currentColor" strokeWidth="1.8">
-        <path strokeLinecap="round" strokeLinejoin="round" d="m9.2 14.8 5.6-5.6" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M7.2 16.8H6a3.8 3.8 0 0 1 0-7.6h4.1a3.8 3.8 0 0 1 3.2 1.8M16.8 7.2H18a3.8 3.8 0 1 1 0 7.6h-4.1a3.8 3.8 0 0 1-3.2-1.8" />
-      </svg>
-    </span>
-  );
+  return <span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" className="size-5" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="m9.2 14.8 5.6-5.6M7.2 16.8H6a3.8 3.8 0 0 1 0-7.6h4.1a3.8 3.8 0 0 1 3.2 1.8M16.8 7.2H18a3.8 3.8 0 1 1 0 7.6h-4.1a3.8 3.8 0 0 1-3.2-1.8" /></svg></span>;
 }
 
-function StepIcon({ number }) {
-  return <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#e9f5e3] text-sm font-semibold text-[#295f22]">{number}</span>;
+function AppHeader({ view, setView, onLogout }) {
+  return <header className="app-topbar"><div className="mx-auto flex min-h-[70px] max-w-7xl items-center justify-between gap-3 px-4 sm:px-7 lg:px-10">
+    <a className="flex items-center gap-2.5 rounded-lg text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand" href="/" aria-label="Linkify home"><BrandMark /><span className="text-xl font-bold tracking-[-.055em]">linkify<span className="text-brand">.</span></span></a>
+    <nav aria-label="Main navigation" className="flex items-center gap-1 sm:gap-2"><button className="nav-pill" aria-current={view === 'create' ? 'page' : undefined} onClick={() => setView('create')}>Create link</button><button className="nav-pill" aria-current={view === 'dashboard' ? 'page' : undefined} onClick={() => setView('dashboard')}>Dashboard</button><button className="nav-pill hidden sm:inline-flex" onClick={onLogout}>Log out</button><button className="icon-button sm:hidden" aria-label="Log out" onClick={onLogout}>↗</button></nav>
+  </div></header>;
 }
 
-function MainApp({ onLogout }) {
+function CreateLinkPage({ onCreated }) {
   const [originalUrl, setOriginalUrl] = useState('');
   const [customAlias, setCustomAlias] = useState('');
   const [title, setTitle] = useState('');
@@ -70,312 +52,92 @@ function MainApp({ onLogout }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [copyState, setCopyState] = useState('idle');
-  const [view, setView] = useState('create');
+  const [showDetails, setShowDetails] = useState(false);
   const aliasRequestId = useRef(0);
   const utmPreview = buildUtmPreview(originalUrl, utm);
 
   async function checkAlias() {
     const alias = customAlias.trim();
-    if (!alias) {
-      setFeedback({ tone: 'error', text: 'Enter an alias to check its availability.' });
-      setSuggestions([]);
-      return;
-    }
-
+    if (!alias) { setFeedback({ tone: 'error', text: 'Enter an alias to check its availability.' }); return; }
     const requestId = ++aliasRequestId.current;
-    setIsChecking(true);
-    setFeedback(null);
-    setSuggestions([]);
-    setLink(null);
+    setIsChecking(true); setFeedback(null); setSuggestions([]); setLink(null);
     try {
       const { response, data } = await requestJson(`/api/aliases/${encodeURIComponent(alias)}/availability`);
       if (requestId !== aliasRequestId.current) return;
       if (!response.ok) throw new Error(data.error ?? 'Could not check this alias.');
-      if (data.available) {
-        setFeedback({ tone: 'success', text: `“${data.alias}” is available to use.` });
-      } else {
-        setFeedback({ tone: 'info', text: `“${data.alias}” is already taken. Choose an available alternative:` });
-        setSuggestions(data.suggestions ?? []);
-      }
-    } catch (error) {
-      if (requestId === aliasRequestId.current) {
-        setFeedback({ tone: 'error', text: error.message });
-      }
-    } finally {
-      if (requestId === aliasRequestId.current) setIsChecking(false);
-    }
+      if (data.available) setFeedback({ tone: 'success', text: `“${data.alias}” is available.` });
+      else { setFeedback({ tone: 'info', text: `“${data.alias}” is taken. Try one of these:` }); setSuggestions(data.suggestions ?? []); }
+    } catch (error) { if (requestId === aliasRequestId.current) setFeedback({ tone: 'error', text: error.message }); }
+    finally { if (requestId === aliasRequestId.current) setIsChecking(false); }
   }
 
   async function shortenLink(event) {
     event.preventDefault();
     const validationMessage = getUrlError(originalUrl);
     setUrlError(validationMessage);
-    if (validationMessage) {
-      setFeedback(null);
-      return;
-    }
+    if (validationMessage) { setFeedback(null); return; }
     if (routingMode === 'adaptive') {
       const invalidRule = firstInvalidAdaptiveRule(adaptiveRules);
-      if (invalidRule) {
-        setFeedback({ tone: 'error', text: `Rule ${invalidRule.index + 1}: ${invalidRule.message}` });
-        return;
-      }
+      if (invalidRule) { setFeedback({ tone: 'error', text: `Rule ${invalidRule.index + 1}: ${invalidRule.message}` }); return; }
     }
-
-    aliasRequestId.current += 1;
-    setIsChecking(false);
-    setIsLoading(true);
-    setFeedback(null);
-    setSuggestions([]);
-    setLink(null);
-    setCopyState('idle');
-
+    aliasRequestId.current += 1; setIsChecking(false); setIsLoading(true); setFeedback(null); setSuggestions([]); setLink(null); setCopyState('idle');
     const payload = { originalUrl: originalUrl.trim() };
     if (routingMode === 'adaptive') payload.adaptiveRouting = { enabled: true, defaultDestinationUrl: originalUrl.trim(), rules: adaptiveRules.map(serializeAdaptiveRule) };
     if (customAlias.trim()) payload.customAlias = customAlias.trim();
     if (title.trim()) payload.title = title.trim();
     if (tags.trim()) payload.tags = tags.split(',').map((value) => value.trim()).filter(Boolean);
     if (Object.values(utm).some((value) => value.trim())) payload.utm = utm;
-
     try {
-      const { response, data } = await requestJson('/api/links', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) {
-        setSuggestions(data.suggestions ?? []);
-        throw new Error(data.error ?? 'Could not shorten this URL.');
-      }
-      setLink(data);
-    } catch (error) {
-      setFeedback({ tone: 'error', text: error.message });
-    } finally {
-      setIsLoading(false);
-    }
+      const { response, data } = await requestJson('/api/links', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (!response.ok) { setSuggestions(data.suggestions ?? []); throw new Error(data.error ?? 'Could not shorten this URL.'); }
+      setLink(data); onCreated?.(data);
+    } catch (error) { setFeedback({ tone: 'error', text: error.message }); }
+    finally { setIsLoading(false); }
   }
 
   async function copyShortUrl() {
-    try {
-      await navigator.clipboard.writeText(link.shortUrl);
-      setCopyState('copied');
-      setFeedback({ tone: 'success', text: 'Short link copied to your clipboard.' });
-    } catch {
-      setFeedback({ tone: 'error', text: 'Could not copy automatically. Select the short link and copy it manually.' });
-    }
+    try { await navigator.clipboard.writeText(link.shortUrl); setCopyState('copied'); setFeedback({ tone: 'success', text: 'Short link copied to your clipboard.' }); }
+    catch { setFeedback({ tone: 'error', text: 'Select the short link and copy it manually.' }); }
   }
 
-  function chooseSuggestion(alias) {
-    aliasRequestId.current += 1;
-    setIsChecking(false);
-    setCustomAlias(alias);
-    setSuggestions([]);
-    setLink(null);
-    setFeedback({ tone: 'info', text: `“${alias}” selected. Shorten the link when you’re ready.` });
-  }
-
-  function updateUrl(value) {
-    setOriginalUrl(value);
-    setUrlError('');
-    setLink(null);
-    setFeedback(null);
-  }
-
-  function updateAlias(value) {
-    aliasRequestId.current += 1;
-    setIsChecking(false);
-    setCustomAlias(value);
-    setSuggestions([]);
-    setLink(null);
-    setFeedback(null);
-  }
-
-  return (
-    <main className="min-h-screen overflow-hidden bg-[#fbfef9] text-[#08160e]">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(ellipse_at_top,_rgba(185,230,162,0.19),_transparent_68%)]" aria-hidden="true" />
-      <header className="relative mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-5 sm:px-7 sm:py-6 lg:px-10">
-        <a className="flex min-w-0 items-center gap-2.5 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#295f22]" href="/" aria-label="Linkify home">
-          <BrandMark />
-          <span className="text-lg font-semibold tracking-[-0.04em] sm:text-[22px]">Linkify</span>
-        </a>
-        <nav className="flex shrink-0 items-center gap-1 sm:gap-2"><button onClick={() => setView('create')} className={`whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3 sm:text-sm ${view === 'create' ? 'bg-[#e9f5e3] text-[#295f22]' : 'text-[#526052] hover:bg-white'}`}>Create link</button><button onClick={() => setView('dashboard')} className={`whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold sm:px-3 sm:text-sm ${view === 'dashboard' ? 'bg-[#e9f5e3] text-[#295f22]' : 'text-[#526052] hover:bg-white'}`}>Dashboard</button><button onClick={onLogout} className="whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold text-[#526052] hover:bg-white sm:px-3 sm:text-sm">Log out</button></nav>
-      </header>
-
-      {view === 'dashboard' ? <LinkDashboard /> : <section className="relative mx-auto grid w-full max-w-7xl grid-cols-1 items-center gap-10 px-4 pb-16 pt-9 sm:px-7 sm:pb-20 sm:pt-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(300px,0.75fr)] lg:gap-20 lg:px-10 lg:pb-24 lg:pt-16">
-        <div className="min-w-0">
-          <p className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border border-[#dce8d6] bg-white/80 px-3 py-1.5 text-xs font-semibold text-[#295f22] sm:mb-6 sm:px-3.5 sm:text-sm">
-            <span className="size-2 rounded-full bg-[#429f24] shadow-[0_0_0_4px_rgba(66,159,36,0.1)]" /> The simpler way to share
-          </p>
-          <h1 className="max-w-[680px] text-[clamp(2.7rem,8vw,4.75rem)] font-semibold leading-[0.99] tracking-[-0.065em]">
-            Long links,<br /><span className="text-[#429f24]">meet their match.</span>
-          </h1>
-          <p className="mt-5 max-w-[510px] text-base leading-7 text-[#526052] sm:mt-6 sm:text-lg sm:leading-8">
-            Create a short, memorable link for the places you want to share. Start with a URL below.
-          </p>
-
-          <form className="mt-8 space-y-4 rounded-[22px] border border-[#e2ebdd] bg-white p-4 shadow-[0_22px_60px_-38px_rgba(8,22,14,0.32)] sm:mt-9 sm:space-y-5 sm:rounded-[26px] sm:p-6" onSubmit={shortenLink} noValidate>
-            <div>
-                <label className="mb-2 block text-sm font-semibold text-[#08160e]" htmlFor="destination-url">{routingMode === 'adaptive' ? 'Default destination URL' : 'Destination URL'}</label>
-              <div className={`flex min-h-12 items-center rounded-xl border bg-[#fcfdfb] px-3.5 transition focus-within:ring-2 focus-within:ring-[#429f24]/30 ${urlError ? 'border-[#c75c50]' : 'border-[#dfe8dc] focus-within:border-[#429f24]'}`}>
-                <svg viewBox="0 0 24 24" fill="none" className="mr-2.5 size-[18px] shrink-0 text-[#7c8979]" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path strokeLinecap="round" strokeLinejoin="round" d="M3.5 9h17M3.5 15h17M12 3c2.2 2.4 3.2 5.4 3.2 9s-1 6.6-3.2 9c-2.2-2.4-3.2-5.4-3.2-9s1-6.6 3.2-9Z" /></svg>
-                <input
-                  id="destination-url"
-                  className="h-12 min-w-0 flex-1 bg-transparent text-base text-[#08160e] outline-none placeholder:text-[#98a296] sm:text-[15px]"
-                  type="url"
-                  inputMode="url"
-                  autoComplete="url"
-                  aria-required="true"
-                  aria-invalid={Boolean(urlError)}
-                  aria-describedby={urlError ? 'url-error' : 'url-hint'}
-                  disabled={isLoading || isChecking}
-                  value={originalUrl}
-                  onChange={(event) => updateUrl(event.target.value)}
-                  placeholder="https://example.com/your-long-link"
-                />
-                {originalUrl && <button type="button" onClick={() => updateUrl('')} disabled={isLoading || isChecking} className="ml-2 grid size-8 shrink-0 place-items-center rounded-lg text-[#718071] hover:bg-[#edf3e9] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#295f22] disabled:cursor-not-allowed disabled:opacity-50" aria-label="Clear destination URL">×</button>}
-              </div>
-              {urlError ? <p id="url-error" className="mt-2 text-sm text-[#922d21]" role="alert">{urlError}</p> : <p id="url-hint" className="mt-2 text-xs leading-5 text-[#718071]">Use a complete URL beginning with http:// or https://</p>}
-              {originalUrl.trim() && <p className="mt-2 break-all rounded-lg bg-[#f5f9f2] p-2 text-xs leading-5 text-[#526052]">Final destination preview: {utmPreview.url || 'Enter a valid HTTP or HTTPS destination URL.'}</p>}
-              {utmPreview.conflicts.length > 0 && <p className="mt-1 text-xs text-[#922d21]">Existing UTM values are preserved and will not be overwritten: {utmPreview.conflicts.join(', ')}.</p>}
-            </div>
-
-            <fieldset className="rounded-xl border border-[#e2ebdd] bg-[#fbfdf9] p-3 sm:p-4">
-              <legend className="px-1 text-sm font-semibold text-[#08160e]">Link type</legend>
-              <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={() => setRoutingMode('standard')} aria-pressed={routingMode === 'standard'} className={`min-h-10 rounded-lg border px-3 text-sm font-semibold ${routingMode === 'standard' ? 'border-[#429f24] bg-[#e9f5e3] text-[#295f22]' : 'border-[#dfe8dc] bg-white text-[#526052]'}`}>Standard link</button>
-                <button type="button" onClick={() => setRoutingMode('adaptive')} aria-pressed={routingMode === 'adaptive'} className={`min-h-10 rounded-lg border px-3 text-sm font-semibold ${routingMode === 'adaptive' ? 'border-[#429f24] bg-[#e9f5e3] text-[#295f22]' : 'border-[#dfe8dc] bg-white text-[#526052]'}`}>Adaptive link</button>
-              </div>
-            </fieldset>
-
-            {routingMode === 'adaptive' && <section className="space-y-3 rounded-xl border border-[#dce8d6] bg-[#f8fbf6] p-3 sm:p-4" aria-label="Adaptive destination rules">
-              <div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-semibold">Smart routing rules</h2><p className="mt-1 text-xs text-[#718071]">Rules are evaluated top to bottom. Conditions within each rule use AND; the first matching rule wins. Otherwise visitors use the default destination.</p></div><button type="button" onClick={() => setAdaptiveRules((rules) => [...rules, createAdaptiveRule()])} disabled={adaptiveRules.length >= 20} className="min-h-9 rounded-lg border border-[#cddfc5] bg-white px-3 text-xs font-semibold text-[#295f22] disabled:opacity-50">Add rule</button></div>
-              {adaptiveRules.length === 0 ? <p className="rounded-lg border border-dashed border-[#cddfc5] bg-white p-3 text-sm text-[#718071]">No rules yet. Visitors will use the default destination.</p> : adaptiveRules.map((rule, index) => <AdaptiveRuleEditor key={rule.ruleId} rule={rule} index={index} count={adaptiveRules.length} onChange={(value) => setAdaptiveRules((rows) => rows.map((row) => row.ruleId === rule.ruleId ? value : row))} onMove={(direction) => setAdaptiveRules((rows) => { const next = [...rows]; [next[index], next[index + direction]] = [next[index + direction], next[index]]; return next; })} onRemove={() => setAdaptiveRules((rows) => rows.filter((row) => row.ruleId !== rule.ruleId))} />)}
-            </section>}
-
-            <div>
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                <label className="text-sm font-semibold text-[#08160e]" htmlFor="custom-alias">Custom alias <span className="font-normal text-[#718071]">(optional)</span></label>
-                <span className="text-xs text-[#718071]">Or we’ll make one for you</span>
-              </div>
-              <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-                <div className="flex min-h-12 min-w-0 flex-1 items-center rounded-xl border border-[#dfe8dc] bg-[#fcfdfb] px-3.5 transition focus-within:border-[#429f24] focus-within:ring-2 focus-within:ring-[#429f24]/30">
-                  <span className="mr-1 shrink-0 text-sm text-[#718071]">linkify /</span>
-                  <input
-                    id="custom-alias"
-                    className="h-12 min-w-0 flex-1 bg-transparent text-base text-[#08160e] outline-none placeholder:text-[#a0aa9f] sm:text-[15px]"
-                    value={customAlias}
-                    autoComplete="off"
-                    maxLength={40}
-                    aria-describedby="alias-hint"
-                    disabled={isLoading || isChecking}
-                    onChange={(event) => updateAlias(event.target.value)}
-                    placeholder="your-alias"
-                  />
-                </div>
-                <button
-                  className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl border border-[#cddfc5] bg-white px-4 text-sm font-semibold text-[#295f22] transition-colors hover:bg-[#f3f8ef] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#295f22] disabled:cursor-wait disabled:opacity-65"
-                  type="button"
-                  disabled={isChecking || isLoading}
-                  onClick={checkAlias}
-                >
-                  {isChecking ? <><span className="size-4 animate-spin rounded-full border-2 border-[#9cb795] border-t-[#295f22] motion-reduce:animate-none" aria-hidden="true" /> Checking</> : 'Check availability'}
-                </button>
-              </div>
-              <p id="alias-hint" className="mt-2 text-xs leading-5 text-[#718071]">3–40 characters: letters, numbers, and hyphens.</p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm font-semibold">Link title <span className="font-normal text-[#718071]">(optional)</span><input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="Spring launch" className="mt-2 min-h-11 w-full rounded-xl border border-[#dfe8dc] bg-[#fcfdfb] px-3 text-sm font-normal outline-none focus:border-[#429f24]" /></label><label className="text-sm font-semibold">Tags <span className="font-normal text-[#718071]">(optional)</span><input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="newsletter, spring" className="mt-2 min-h-11 w-full rounded-xl border border-[#dfe8dc] bg-[#fcfdfb] px-3 text-sm font-normal outline-none focus:border-[#429f24]" /></label></div>
-
-            <details className="rounded-xl border border-[#e2ebdd] bg-[#fcfdfb] p-3"><summary className="cursor-pointer text-sm font-semibold text-[#295f22]">Add campaign tracking parameters (UTM)</summary><div className="mt-3 grid gap-3 sm:grid-cols-2">{UTM_KEYS.map((key) => <label key={key} className="text-xs font-semibold text-[#526052]">{key}<input value={utm[key] ?? ''} onChange={(e) => setUtm((current) => ({ ...current, [key]: e.target.value }))} maxLength={200} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm font-normal" /></label>)}</div><p className="mt-1 text-xs text-[#718071]">UTM parameters describe attribution labels. They do not verify visits, leads, or sales.</p></details>
-
-            <button
-              className="inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-[#429f24] px-5 py-3 text-base font-semibold text-white shadow-[0_7px_14px_rgba(66,159,36,0.18)] transition-colors hover:bg-[#347d1d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#295f22] disabled:cursor-wait disabled:bg-[#78b65e] disabled:shadow-none"
-              type="submit"
-              disabled={isLoading || isChecking}
-              aria-busy={isLoading}
-            >
-              {isLoading ? <><span className="size-[18px] animate-spin rounded-full border-2 border-white/50 border-t-white motion-reduce:animate-none" aria-hidden="true" /> Creating your short link</> : <>Shorten link <span aria-hidden="true">→</span></>}
-            </button>
-          </form>
-
-          <div className="mt-4 space-y-3 sm:mt-5" aria-live="polite">
-            <StatusMessage message={feedback?.text} tone={feedback?.tone} />
-            <AliasSuggestions aliases={suggestions} onSelect={chooseSuggestion} />
-            <ShortLinkResult link={link} copyState={copyState} onCopy={copyShortUrl} />
-          </div>
-
-          <p className="mt-5 flex items-center justify-center gap-2 text-center text-xs leading-5 text-[#718071] sm:justify-start sm:text-sm">
-            <svg viewBox="0 0 24 24" fill="none" className="size-4 shrink-0 text-[#429f24]" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3 5 6v5c0 4.5 2.7 7.9 7 10 4.3-2.1 7-5.5 7-10V6l-7-3Z" /><path strokeLinecap="round" strokeLinejoin="round" d="m9 12 2 2 4-4" /></svg>
-            Your destination is validated before a link is created.
-          </p>
-        </div>
-
-        <aside className="relative mx-auto w-full max-w-[520px] overflow-hidden rounded-[28px] bg-[#08160e] p-6 text-white shadow-[0_30px_75px_-40px_rgba(8,22,14,0.55)] sm:rounded-[34px] sm:p-8 lg:p-9" aria-label="How Linkify works">
-          <div className="absolute -right-24 -top-28 size-72 rounded-full border border-[#b9e6a2]/10" aria-hidden="true" />
-          <div className="absolute -right-14 -top-20 size-56 rounded-full border border-[#b9e6a2]/10" aria-hidden="true" />
-          <div className="absolute -right-7 -top-10 size-36 rounded-full bg-[#429f24]/10 blur-2xl" aria-hidden="true" />
-          <div className="relative">
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-[#c6d8c0]">
-              <span className="size-1.5 rounded-full bg-[#b9e6a2]" /> Less link. More clarity.
-            </span>
-            <h2 className="mt-7 max-w-sm text-[clamp(1.65rem,5vw,2.25rem)] font-medium leading-tight tracking-[-0.04em]">A little link can go a long way.</h2>
-            <p className="mt-3 max-w-sm text-sm leading-6 text-[#aab9a6]">Keep sharing simple with a short address that’s easy to remember and pass along.</p>
-
-            <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.055] p-4 sm:mt-9 sm:p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#9eaf99]">Made for the way you share</p>
-              <ol className="mt-5 space-y-4 sm:space-y-5">
-                <li className="flex items-center gap-3.5"><StepIcon number="01" /><span className="text-sm leading-5 text-[#e5ece2]">Turn a long URL into a short link</span></li>
-                <li className="flex items-center gap-3.5"><StepIcon number="02" /><span className="text-sm leading-5 text-[#e5ece2]">Make the ending your own</span></li>
-                <li className="flex items-center gap-3.5"><StepIcon number="03" /><span className="text-sm leading-5 text-[#e5ece2]">Share it wherever you like</span></li>
-              </ol>
-            </div>
-
-            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-[#b9e6a2]/15 bg-[#429f24]/[0.09] p-4">
-              <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-[#429f24]/20 text-[#b9e6a2]" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" className="size-4" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.36-6.36-1.42 1.42M7.06 16.94l-1.42 1.42m12.72 0-1.42-1.42M7.06 7.06 5.64 5.64" /><circle cx="12" cy="12" r="4" /></svg>
-              </span>
-              <p className="text-xs leading-5 text-[#c3d1bf] sm:text-sm">Want a memorable name? Check availability before you create your link.</p>
-            </div>
-          </div>
-        </aside>
-      </section>}
-
-      <footer className="relative border-t border-[#e8eee5] bg-white/45 px-4 py-5 text-center text-xs text-[#718071] sm:px-6 sm:py-6 sm:text-sm">Linkify <span className="mx-1 text-[#a0aa9f]">·</span> A clearer way to share links.</footer>
-    </main>
-  );
+  return <section className="mx-auto w-full max-w-7xl px-4 pb-14 pt-9 sm:px-7 sm:pt-12 lg:px-10">
+    <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">LINK STUDIO <span className="mx-1 text-brand">/</span> CREATE</p><h1 className="mt-3 max-w-3xl text-4xl font-semibold leading-[1.04] tracking-[-.055em] sm:text-5xl">Make your next link <span className="text-brand">work harder.</span></h1><p className="mt-3 max-w-xl text-sm leading-6 text-muted sm:text-base">Short, memorable links with a clear view of what happens after the click.</p></div><div className="hidden items-center gap-2 rounded-full border border-line bg-surface px-3 py-2 text-xs font-semibold text-muted sm:flex"><span className="size-2 rounded-full bg-brand" /> Your workspace is ready</div></div>
+    <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(300px,.75fr)] lg:gap-7">
+      <div className="min-w-0">
+        <form className="panel space-y-5 p-4 sm:p-6 lg:p-7" onSubmit={shortenLink} noValidate>
+          <div className="flex items-center justify-between gap-3"><div><p className="eyebrow">START WITH A DESTINATION</p><p className="mt-1 text-sm text-muted">It takes just a URL to begin.</p></div><span className="grid size-10 place-items-center rounded-xl bg-brand-soft text-brand" aria-hidden="true">↗</span></div>
+          <div><label className="mb-2 block text-sm font-semibold" htmlFor="destination-url">Destination URL</label><div className={`flex min-h-[54px] items-center rounded-xl border bg-white px-3 transition focus-within:ring-4 focus-within:ring-brand/10 ${urlError ? 'border-danger' : 'border-line focus-within:border-brand'}`}><svg viewBox="0 0 24 24" fill="none" className="mr-2.5 size-[18px] shrink-0 text-muted" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M3.5 9h17M3.5 15h17M12 3c2.2 2.4 3.2 5.4 3.2 9s-1 6.6-3.2 9c-2.2-2.4-3.2-5.4-3.2-9s1-6.6 3.2-9Z"/></svg><input id="destination-url" className="h-[52px] min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-[#9aa39a]" type="url" inputMode="url" autoComplete="url" aria-required="true" aria-invalid={Boolean(urlError)} aria-describedby={urlError ? 'url-error' : 'url-hint'} disabled={isLoading || isChecking} value={originalUrl} onChange={(event) => { setOriginalUrl(event.target.value); setUrlError(''); setLink(null); setFeedback(null); }} placeholder="https://example.com/your-long-link" />{originalUrl && <button type="button" onClick={() => { setOriginalUrl(''); setUrlError(''); }} className="icon-button ml-2" aria-label="Clear destination URL">×</button>}</div>{urlError ? <p id="url-error" className="mt-2 text-sm text-danger" role="alert">{urlError}</p> : <p id="url-hint" className="mt-2 text-xs text-muted">Paste a complete URL starting with http:// or https://</p>}{originalUrl.trim() && <p className="mt-3 break-all rounded-xl bg-canvas-subtle px-3 py-2.5 text-xs leading-5 text-muted">Final destination: <span className="font-medium text-ink">{utmPreview.url || 'Enter a valid web address.'}</span></p>}{utmPreview.conflicts.length > 0 && <p className="mt-2 text-xs text-danger">Existing UTM values are kept: {utmPreview.conflicts.join(', ')}.</p>}</div>
+          <fieldset><legend className="mb-2 text-sm font-semibold">Choose how it routes</legend><div className="grid grid-cols-2 gap-2 rounded-xl bg-canvas-subtle p-1.5"><button type="button" onClick={() => setRoutingMode('standard')} aria-pressed={routingMode === 'standard'} className={`min-h-11 rounded-lg px-3 text-sm font-semibold transition ${routingMode === 'standard' ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'}`}>Standard</button><button type="button" onClick={() => setRoutingMode('adaptive')} aria-pressed={routingMode === 'adaptive'} className={`min-h-11 rounded-lg px-3 text-sm font-semibold transition ${routingMode === 'adaptive' ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'}`}>Adaptive <span className="ml-1 rounded-full bg-brand-soft px-1.5 py-0.5 text-[10px] text-brand">SMART</span></button></div><p className="mt-2 text-xs text-muted">{routingMode === 'standard' ? 'One memorable link, one destination.' : 'Send different audiences to the destination that fits.'}</p></fieldset>
+          {routingMode === 'adaptive' && <div className="rounded-2xl border border-line bg-[#fbfcf8] p-3 sm:p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold">Smart routing rules</p><p className="mt-1 max-w-lg text-xs leading-5 text-muted">Rules run top to bottom. Every condition in a rule must match; otherwise visitors go to the default URL.</p></div><button type="button" onClick={() => setAdaptiveRules((rules) => [...rules, createAdaptiveRule()])} disabled={adaptiveRules.length >= 20} className="button-secondary min-h-10 px-3 text-xs">+ Add rule</button></div><div className="mt-3 space-y-2">{adaptiveRules.length ? adaptiveRules.map((rule, index) => <AdaptiveRuleEditor key={rule.ruleId} rule={rule} index={index} count={adaptiveRules.length} onChange={(value) => setAdaptiveRules((rows) => rows.map((row) => row.ruleId === rule.ruleId ? value : row))} onMove={(direction) => setAdaptiveRules((rows) => { const next = [...rows]; [next[index], next[index + direction]] = [next[index + direction], next[index]]; return next; })} onRemove={() => setAdaptiveRules((rows) => rows.filter((row) => row.ruleId !== rule.ruleId))} />) : <div className="rounded-xl border border-dashed border-line bg-surface p-4 text-center"><p className="text-sm font-medium">Start with a rule</p><p className="mt-1 text-xs text-muted">For example, send mobile visitors to a mobile-friendly page.</p><button type="button" onClick={() => setAdaptiveRules([createAdaptiveRule()])} className="button-quiet mt-2 text-xs text-brand">Create your first rule</button></div>}</div></div>}
+          <div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-semibold">Custom alias <span className="font-normal text-muted">(optional)</span><div className="mt-1 flex min-h-11 items-center rounded-xl border border-line bg-white px-3"><span className="text-sm text-muted">linkify /</span><input id="custom-alias" className="h-10 min-w-0 flex-1 bg-transparent pl-1 text-sm font-normal outline-none" value={customAlias} maxLength={40} autoComplete="off" aria-describedby="alias-hint" disabled={isLoading || isChecking} onChange={(event) => { setCustomAlias(event.target.value); setLink(null); setFeedback(null); }} placeholder="your-alias" /></div><span id="alias-hint" className="mt-1 block font-normal text-muted">3–40 letters, numbers or hyphens.</span></label><div className="flex items-end"><button type="button" className="button-secondary w-full" disabled={isChecking || isLoading} onClick={checkAlias}>{isChecking ? 'Checking…' : 'Check availability'}</button></div></div>
+          <button type="button" className="flex min-h-10 w-full items-center justify-between rounded-xl border border-transparent px-1 text-left text-sm font-semibold text-brand hover:border-line hover:bg-white" aria-expanded={showDetails} onClick={() => setShowDetails((value) => !value)}><span>Advanced details <span className="font-normal text-muted">· title, tags and campaign labels</span></span><span aria-hidden="true">{showDetails ? '−' : '+'}</span></button>
+          {showDetails && <div className="grid gap-3 rounded-xl bg-canvas-subtle p-3 sm:grid-cols-2"><label className="text-xs font-semibold">Link title<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="Spring launch" className="field-control" /></label><label className="text-xs font-semibold">Tags<input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="newsletter, spring" className="field-control" /></label><fieldset className="grid gap-3 sm:col-span-2 sm:grid-cols-3"><legend className="text-xs font-semibold">Campaign tracking (UTM)</legend>{UTM_KEYS.map((key) => <label key={key} className="text-xs font-medium text-muted">{key}<input value={utm[key] ?? ''} onChange={(event) => setUtm((current) => ({ ...current, [key]: event.target.value }))} maxLength={200} className="field-control" /></label>)}<p className="text-[11px] text-muted sm:col-span-3">Declared UTM labels help describe campaign attribution; they do not verify visits, leads or sales.</p></fieldset></div>}
+          <button className="button-primary w-full sm:w-auto sm:min-w-48" type="submit" disabled={isLoading || isChecking} aria-busy={isLoading}>{isLoading ? <><span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white motion-reduce:animate-none" aria-hidden="true"/>Creating link…</> : <>Create link <span aria-hidden="true">→</span></>}</button>
+        </form>
+        <div className="mt-4 space-y-3" aria-live="polite"><StatusMessage message={feedback?.text} tone={feedback?.tone} /><AliasSuggestions aliases={suggestions} onSelect={(alias) => { setCustomAlias(alias); setSuggestions([]); setFeedback({ tone: 'info', text: `“${alias}” selected. Create your link when ready.` }); }} /><ShortLinkResult link={link} copyState={copyState} onCopy={copyShortUrl} onAnalytics={() => onCreated?.({ ...link, showAnalytics: true })} /></div>
+      </div>
+      <aside className="space-y-4 lg:sticky lg:top-24" aria-label="Link tips">
+        <div className="relative overflow-hidden rounded-[24px] bg-[#203b29] p-5 text-white sm:p-7"><div className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full border border-white/10"/><div className="pointer-events-none absolute -right-8 -top-8 size-40 rounded-full border border-white/10"/><p className="eyebrow !text-[#c2d5bd]">PRECISION × PLAYFULNESS</p><h2 className="relative mt-5 max-w-sm text-2xl font-semibold leading-tight tracking-[-.04em] sm:text-3xl">One little link. A lot more clarity.</h2><p className="relative mt-3 max-w-sm text-sm leading-6 text-[#d4dfd0]">Choose a clear destination, share the short version, and learn how people arrive.</p><div className="relative mt-7 rounded-2xl border border-white/10 bg-white/[.07] p-4"><p className="text-xs font-semibold text-[#d5e4d0]">GOOD TO KNOW</p><p className="mt-2 text-sm leading-6 text-white/80">A redirect is a click event—not a unique visitor, sale or conversion.</p></div></div>
+        <div className="panel p-4 sm:p-5"><p className="text-sm font-semibold">A quick path</p><ol className="mt-4 space-y-3 text-sm text-muted"><li className="flex items-center gap-3"><span className="priority-pill">01</span>Paste your destination</li><li className="flex items-center gap-3"><span className="priority-pill">02</span>Choose standard or adaptive</li><li className="flex items-center gap-3"><span className="priority-pill">03</span>Create and share</li></ol></div>
+        <p className="px-1 text-xs leading-5 text-muted">Your destination is validated before a link is created. Adaptive routes use only the conditions you configure.</p>
+      </aside>
+    </div>
+  </section>;
 }
 
 function AdminLogin({ onLogin }) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  async function submit(event) {
-    event.preventDefault(); setLoading(true); setError('');
-    try {
-      const { response, data } = await requestJson('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
-      if (!response.ok) throw new Error(data.error ?? 'Login failed.');
-      onLogin(data.username);
-    } catch (loginError) { setError(loginError.message); }
-    finally { setLoading(false); }
-  }
-  return <main className="grid min-h-screen place-items-center bg-[#fbfef9] px-4"><form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-[#e2ebdd] bg-white p-6 shadow-lg"><h1 className="text-2xl font-semibold">Linkify staging sign in</h1><label className="block text-sm font-semibold">Username<input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-[#dfe8dc] px-3 font-normal" /></label><label className="block text-sm font-semibold">Password<input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-[#dfe8dc] px-3 font-normal" /></label>{error && <p role="alert" className="text-sm text-[#922d21]">{error}</p>}<button disabled={loading} className="min-h-11 w-full rounded-lg bg-[#429f24] font-semibold text-white disabled:opacity-60">{loading ? 'Signing in…' : 'Sign in'}</button></form></main>;
+  const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
+  async function submit(event) { event.preventDefault(); setLoading(true); setError(''); try { const { response, data } = await requestJson('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) }); if (!response.ok) throw new Error(data.error ?? 'Login failed.'); onLogin(data.username); } catch (loginError) { setError(loginError.message); } finally { setLoading(false); } }
+  return <main className="grid min-h-screen place-items-center bg-canvas px-4 py-10"><form onSubmit={submit} className="panel w-full max-w-md space-y-5 p-6 sm:p-8"><div className="flex items-center gap-3"><BrandMark/><div><p className="text-lg font-bold tracking-tight">linkify<span className="text-brand">.</span></p><p className="text-xs text-muted">A clearer way to share</p></div></div><div><p className="eyebrow">WORKSPACE ACCESS</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Welcome back.</h1><p className="mt-2 text-sm text-muted">Sign in to manage your links and analytics.</p></div><label className="block text-sm font-semibold">Username<input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} className="field-control" /></label><label className="block text-sm font-semibold">Password<input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="field-control" /></label>{error && <p role="alert" className="rounded-xl border border-[#efd5cf] bg-[#fff4f0] p-3 text-sm text-danger">{error}</p>}<button disabled={loading} className="button-primary w-full disabled:opacity-60">{loading ? 'Signing in…' : 'Sign in'}</button></form></main>;
 }
 
 function App() {
-  const [authState, setAuthState] = useState('loading');
-  useEffect(() => {
-    fetch(`${API_URL}/api/auth/session`, { credentials: 'include' }).then((response) => response.json()).then((data) => setAuthState(data.authenticated ? 'authenticated' : 'anonymous')).catch(() => setAuthState('anonymous'));
-    const onUnauthorized = () => setAuthState('anonymous');
-    window.addEventListener('linkify:unauthorized', onUnauthorized);
-    return () => window.removeEventListener('linkify:unauthorized', onUnauthorized);
-  }, []);
-  async function logout() {
-    await fetch(`${API_URL}/api/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
-    setAuthState('anonymous');
-  }
-  if (authState === 'loading') return <main className="grid min-h-screen place-items-center text-sm text-[#526052]">Checking session…</main>;
-  return authState === 'authenticated' ? <MainApp onLogout={logout} /> : <AdminLogin onLogin={() => setAuthState('authenticated')} />;
+  const [authState, setAuthState] = useState('loading'); const [view, setView] = useState('create'); const [createdLink, setCreatedLink] = useState(null);
+  useEffect(() => { fetch(`${API_URL}/api/auth/session`, { credentials: 'include' }).then((response) => response.json()).then((data) => setAuthState(data.authenticated ? 'authenticated' : 'anonymous')).catch(() => setAuthState('anonymous')); const onUnauthorized = () => setAuthState('anonymous'); window.addEventListener('linkify:unauthorized', onUnauthorized); return () => window.removeEventListener('linkify:unauthorized', onUnauthorized); }, []);
+  async function logout() { await fetch(`${API_URL}/api/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {}); setAuthState('anonymous'); }
+  if (authState === 'loading') return <main className="grid min-h-screen place-items-center bg-canvas px-4 text-sm text-muted"><div className="w-full max-w-sm space-y-4" role="status" aria-label="Checking session"><div className="skeleton h-8 w-40 rounded-lg"/><div className="skeleton h-4 w-full rounded"/><div className="skeleton h-32 w-full rounded-2xl"/><span className="sr-only">Checking session…</span></div></main>;
+  if (authState !== 'authenticated') return <AdminLogin onLogin={() => setAuthState('authenticated')} />;
+  return <div className="app-shell"><AppHeader view={view} setView={setView} onLogout={logout}/><main id="main-content">{view === 'dashboard' ? <LinkDashboard onCreateLink={() => setView('create')} initialExpanded={createdLink?.showAnalytics ? createdLink.id : null} /> : <CreateLinkPage onCreated={(link) => { setCreatedLink(link); if (link.showAnalytics) setView('dashboard'); }} />}</main><footer className="safe-bottom border-t border-line bg-surface px-4 py-5 text-center text-xs text-muted">Linkify <span className="mx-1">·</span> A clearer way to share links.</footer></div>;
 }
 
 export default App;

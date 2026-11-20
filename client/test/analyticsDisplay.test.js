@@ -4,7 +4,9 @@ import { formatAnalyticsLabel, formatCountryName } from '../src/utils/analyticsD
 
 test('analytics display labels normalize known categories and gracefully handle missing values', () => {
   assert.equal(formatAnalyticsLabel('unknown'), 'Unknown');
+  assert.equal(formatAnalyticsLabel('mobile'), 'Mobile');
   assert.equal(formatAnalyticsLabel('desktop'), 'Desktop');
+  assert.equal(formatAnalyticsLabel('tablet'), 'Tablet');
   assert.equal(formatAnalyticsLabel('chrome'), 'Chrome');
   assert.equal(formatAnalyticsLabel('macOS'), 'macOS');
   assert.equal(formatAnalyticsLabel(undefined), 'Unknown');

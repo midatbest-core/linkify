@@ -95,7 +95,7 @@ export function LinkAnalytics({ analytics, routing, loading, error }) {
     if (history?.ownerId === 'default' || destination.destinationId === 'default') return `Default · ${history?.destinationUrl ?? routing?.defaultDestinationUrl ?? ''}`;
     const ruleId = history?.ownerId ?? destination.matchedRuleId;
     const rule = routing?.rules?.find((entry) => entry.ruleId === ruleId);
-    return `${rule?.deviceType ?? 'Rule'} · ${history?.destinationUrl ?? rule?.destinationUrl ?? destination.destinationId}`;
+    return `${formatAnalyticsLabel(rule?.deviceType ?? 'Rule')} · ${history?.destinationUrl ?? rule?.destinationUrl ?? destination.destinationId}`;
   };
   return <div className="mt-4 space-y-3 border-t border-[#e2ebdd] pt-4">
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">{metricCards.map(([label, value]) => <div key={label} className="rounded-lg bg-[#f5f9f2] p-3"><p className="text-[11px] text-[#718071]">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></div>)}</div>

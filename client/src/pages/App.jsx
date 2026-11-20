@@ -3,8 +3,9 @@ import AliasSuggestions from '../components/AliasSuggestions.jsx';
 import ShortLinkResult from '../components/ShortLinkResult.jsx';
 import StatusMessage from '../components/StatusMessage.jsx';
 import LinkDashboard from '../components/LinkDashboard.jsx';
+import AdaptiveRuleEditor, { createAdaptiveRule } from '../components/AdaptiveRuleEditor.jsx';
 import { UTM_KEYS, buildUtmPreview } from '../utils/utm.js';
-import { firstInvalidAdaptiveRule, getAdaptiveRuleUrlError } from '../utils/adaptiveRoutingValidation.js';
+import { firstInvalidAdaptiveRule, serializeAdaptiveRule } from '../utils/adaptiveRoutingValidation.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
 
@@ -130,7 +131,7 @@ function MainApp({ onLogout }) {
     setCopyState('idle');
 
     const payload = { originalUrl: originalUrl.trim() };
-    if (routingMode === 'adaptive') payload.adaptiveRouting = { enabled: true, defaultDestinationUrl: originalUrl.trim(), rules: adaptiveRules.map(({ ruleId, deviceType, destinationUrl, enabled }) => ({ ruleId, deviceType, destinationUrl, enabled })) };
+    if (routingMode === 'adaptive') payload.adaptiveRouting = { enabled: true, defaultDestinationUrl: originalUrl.trim(), rules: adaptiveRules.map(serializeAdaptiveRule) };
     if (customAlias.trim()) payload.customAlias = customAlias.trim();
     if (title.trim()) payload.title = title.trim();
     if (tags.trim()) payload.tags = tags.split(',').map((value) => value.trim()).filter(Boolean);
@@ -247,12 +248,8 @@ function MainApp({ onLogout }) {
             </fieldset>
 
             {routingMode === 'adaptive' && <section className="space-y-3 rounded-xl border border-[#dce8d6] bg-[#f8fbf6] p-3 sm:p-4" aria-label="Adaptive destination rules">
-              <div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-semibold">Device routing rules</h2><p className="mt-1 text-xs text-[#718071]">Rules are checked from top to bottom. The default destination is used if none match.</p></div><button type="button" onClick={() => setAdaptiveRules((rules) => [...rules, { ruleId: crypto.randomUUID(), deviceType: 'mobile', destinationUrl: '', enabled: true }])} disabled={adaptiveRules.length >= 20} className="min-h-9 rounded-lg border border-[#cddfc5] bg-white px-3 text-xs font-semibold text-[#295f22] disabled:opacity-50">Add rule</button></div>
-              {adaptiveRules.length === 0 ? <p className="rounded-lg border border-dashed border-[#cddfc5] bg-white p-3 text-sm text-[#718071]">No rules yet. Visitors will use the default destination.</p> : adaptiveRules.map((rule, index) => <div key={rule.ruleId} className="grid min-w-0 gap-2 rounded-lg border border-[#e2ebdd] bg-white p-3 sm:grid-cols-[minmax(0,130px)_minmax(0,1fr)_auto] sm:items-end">
-                <label className="text-xs font-semibold text-[#526052]">Rule {index + 1}<select value={rule.deviceType} onChange={(event) => setAdaptiveRules((rows) => rows.map((row) => row.ruleId === rule.ruleId ? { ...row, deviceType: event.target.value } : row))} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] px-2 text-sm font-normal"><option value="mobile">Mobile</option><option value="desktop">Desktop</option><option value="tablet">Tablet</option></select></label>
-                <label className="min-w-0 text-xs font-semibold text-[#526052]">Destination URL<input type="url" required aria-invalid={Boolean(getAdaptiveRuleUrlError(rule.destinationUrl))} value={rule.destinationUrl} onChange={(event) => setAdaptiveRules((rows) => rows.map((row) => row.ruleId === rule.ruleId ? { ...row, destinationUrl: event.target.value } : row))} placeholder="https://example.com/mobile" className="mt-1 min-h-10 w-full min-w-0 rounded-lg border border-[#dfe8dc] px-3 text-sm font-normal" />{getAdaptiveRuleUrlError(rule.destinationUrl) && <span className="mt-1 block text-xs font-normal text-[#922d21]">{getAdaptiveRuleUrlError(rule.destinationUrl)}</span>}</label>
-                <div className="flex items-center gap-1 sm:pb-0"><label className="flex min-h-10 items-center gap-1 text-xs"><input type="checkbox" checked={rule.enabled} onChange={(event) => setAdaptiveRules((rows) => rows.map((row) => row.ruleId === rule.ruleId ? { ...row, enabled: event.target.checked } : row))} />Enabled</label><button type="button" aria-label={`Move rule ${index + 1} up`} disabled={index === 0} onClick={() => setAdaptiveRules((rows) => { const next = [...rows]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next; })} className="grid size-9 place-items-center rounded border disabled:opacity-40">↑</button><button type="button" aria-label={`Move rule ${index + 1} down`} disabled={index === adaptiveRules.length - 1} onClick={() => setAdaptiveRules((rows) => { const next = [...rows]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; return next; })} className="grid size-9 place-items-center rounded border disabled:opacity-40">↓</button><button type="button" aria-label={`Remove rule ${index + 1}`} onClick={() => setAdaptiveRules((rows) => rows.filter((row) => row.ruleId !== rule.ruleId))} className="grid size-9 place-items-center rounded border border-[#f1c9c4] text-[#922d21]">×</button></div>
-              </div>)}
+              <div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-semibold">Smart routing rules</h2><p className="mt-1 text-xs text-[#718071]">Rules are evaluated top to bottom. Conditions within each rule use AND; the first matching rule wins. Otherwise visitors use the default destination.</p></div><button type="button" onClick={() => setAdaptiveRules((rules) => [...rules, createAdaptiveRule()])} disabled={adaptiveRules.length >= 20} className="min-h-9 rounded-lg border border-[#cddfc5] bg-white px-3 text-xs font-semibold text-[#295f22] disabled:opacity-50">Add rule</button></div>
+              {adaptiveRules.length === 0 ? <p className="rounded-lg border border-dashed border-[#cddfc5] bg-white p-3 text-sm text-[#718071]">No rules yet. Visitors will use the default destination.</p> : adaptiveRules.map((rule, index) => <AdaptiveRuleEditor key={rule.ruleId} rule={rule} index={index} count={adaptiveRules.length} onChange={(value) => setAdaptiveRules((rows) => rows.map((row) => row.ruleId === rule.ruleId ? value : row))} onMove={(direction) => setAdaptiveRules((rows) => { const next = [...rows]; [next[index], next[index + direction]] = [next[index + direction], next[index]]; return next; })} onRemove={() => setAdaptiveRules((rows) => rows.filter((row) => row.ruleId !== rule.ruleId))} />)}
             </section>}
 
             <div>

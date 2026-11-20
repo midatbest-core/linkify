@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import QrCode from './QrCode.jsx';
 import { DateRange, LinkAnalytics, OverviewAnalytics } from './AnalyticsViews.jsx';
-import { firstInvalidAdaptiveRule, getAdaptiveRuleUrlError } from '../utils/adaptiveRoutingValidation.js';
+import AdaptiveRuleEditor, { createAdaptiveRule, prepareAdaptiveRule } from './AdaptiveRuleEditor.jsx';
+import { firstInvalidAdaptiveRule, serializeAdaptiveRule } from '../utils/adaptiveRoutingValidation.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
 async function apiFetch(url, options) {
@@ -26,6 +27,7 @@ export default function LinkDashboard() {
   const [expanded, setExpanded] = useState(null);
   const [editing, setEditing] = useState(null);
   const [draft, setDraft] = useState({});
+  const [savingEdit, setSavingEdit] = useState(false);
   const [copied, setCopied] = useState(null);
   const [range, setRange] = useState({ from: dateDaysAgo(29), to: utcToday() });
   const [overview, setOverview] = useState(null);
@@ -107,7 +109,7 @@ export default function LinkDashboard() {
   }
   function beginEdit(link) {
     setEditing(link.id);
-    setDraft({ originalUrl: link.originalUrl, title: link.title ?? '', tags: (link.tags ?? []).join(', '), adaptiveRouting: { enabled: link.adaptiveRouting?.enabled === true, defaultDestinationUrl: link.adaptiveRouting?.defaultDestinationUrl ?? link.originalUrl, rules: (link.adaptiveRouting?.rules ?? []).map((rule) => ({ ...rule })) } });
+    setDraft({ originalUrl: link.originalUrl, title: link.title ?? '', tags: (link.tags ?? []).join(', '), adaptiveRouting: { enabled: link.adaptiveRouting?.enabled === true, defaultDestinationUrl: link.adaptiveRouting?.defaultDestinationUrl ?? link.originalUrl, rules: (link.adaptiveRouting?.rules ?? []).map(prepareAdaptiveRule) } });
   }
   async function saveEdit(link) {
     setError('');
@@ -116,10 +118,11 @@ export default function LinkDashboard() {
       setError(`Rule ${invalidRule.index + 1}: ${invalidRule.message}`);
       return;
     }
+    setSavingEdit(true);
     try {
       const response = await apiFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ originalUrl: draft.originalUrl, title: draft.title, tags: draft.tags.split(',').map((value) => value.trim()).filter(Boolean), adaptiveRouting: { ...draft.adaptiveRouting, defaultDestinationUrl: draft.originalUrl, rules: draft.adaptiveRouting.rules.map(({ ruleId, deviceType, destinationUrl, enabled }) => ({ ruleId, deviceType, destinationUrl, enabled })) } }),
+        body: JSON.stringify({ originalUrl: draft.originalUrl, title: draft.title, tags: draft.tags.split(',').map((value) => value.trim()).filter(Boolean), adaptiveRouting: { ...draft.adaptiveRouting, defaultDestinationUrl: draft.originalUrl, rules: draft.adaptiveRouting.rules.map(serializeAdaptiveRule) } }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Could not update this link.');
@@ -130,6 +133,7 @@ export default function LinkDashboard() {
         if (links.length === 1 && page > 1) setPage((current) => current - 1);
       } else setLinks((current) => current.map((item) => item.id === link.id ? { ...item, ...data.link } : item));
     } catch (e) { setError(e.message || 'Could not reach Linkify.'); }
+    finally { setSavingEdit(false); }
   }
   async function toggleArchive(link) {
     const nextStatus = link.status === 'archived' ? 'active' : 'archived';
@@ -162,9 +166,9 @@ export default function LinkDashboard() {
           </div>
           {editing === link.id && <div className="mt-4 grid gap-3 rounded-xl bg-[#f8fbf6] p-3 sm:grid-cols-2"><label className="text-xs font-semibold text-[#526052]">Title<input value={draft.title} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} maxLength={120} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm font-normal" /></label><label className="text-xs font-semibold text-[#526052]">Tags, comma separated<input value={draft.tags} onChange={(e) => setDraft((d) => ({ ...d, tags: e.target.value }))} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm font-normal" /></label><label className="text-xs font-semibold text-[#526052] sm:col-span-2">Default destination URL<input type="url" value={draft.originalUrl} onChange={(e) => setDraft((d) => ({ ...d, originalUrl: e.target.value, adaptiveRouting: { ...d.adaptiveRouting, defaultDestinationUrl: e.target.value } }))} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm font-normal" /></label>
             <label className="flex min-h-10 items-center gap-2 text-sm font-semibold sm:col-span-2"><input type="checkbox" checked={draft.adaptiveRouting.enabled} onChange={(e) => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, enabled: e.target.checked } }))} />Enable adaptive routing</label>
-            <div className="space-y-2 sm:col-span-2"><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#526052]">Device rules, top to bottom</p><button type="button" onClick={() => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: [...d.adaptiveRouting.rules, { ruleId: crypto.randomUUID(), deviceType: 'mobile', destinationUrl: '', enabled: true }] } }))} disabled={draft.adaptiveRouting.rules.length >= 20} className="min-h-9 rounded-lg border bg-white px-3 text-xs font-semibold text-[#295f22] disabled:opacity-50">Add rule</button></div>
-              {draft.adaptiveRouting.rules.map((rule, index) => <div key={rule.ruleId} className="grid min-w-0 gap-2 rounded-lg border border-[#e2ebdd] bg-white p-3 sm:grid-cols-[130px_minmax(0,1fr)_auto]"><label className="text-xs">Rule {index + 1}<select value={rule.deviceType} onChange={(e) => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: d.adaptiveRouting.rules.map((r) => r.ruleId === rule.ruleId ? { ...r, deviceType: e.target.value } : r) } }))} className="mt-1 min-h-9 w-full rounded border px-2 text-sm"><option value="mobile">Mobile</option><option value="desktop">Desktop</option><option value="tablet">Tablet</option></select></label><label className="min-w-0 text-xs">Destination URL<input required aria-invalid={Boolean(getAdaptiveRuleUrlError(rule.destinationUrl))} value={rule.destinationUrl} onChange={(e) => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: d.adaptiveRouting.rules.map((r) => r.ruleId === rule.ruleId ? { ...r, destinationUrl: e.target.value } : r) } }))} className="mt-1 min-h-9 w-full min-w-0 rounded border px-2 text-sm" />{getAdaptiveRuleUrlError(rule.destinationUrl) && <span className="mt-1 block text-xs text-[#922d21]">{getAdaptiveRuleUrlError(rule.destinationUrl)}</span>}</label><div className="flex items-center gap-1"><label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={rule.enabled} onChange={(e) => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: d.adaptiveRouting.rules.map((r) => r.ruleId === rule.ruleId ? { ...r, enabled: e.target.checked } : r) } }))} />On</label><button type="button" aria-label={`Move rule ${index + 1} up`} disabled={!index} onClick={() => setDraft((d) => { const rules = [...d.adaptiveRouting.rules]; [rules[index - 1], rules[index]] = [rules[index], rules[index - 1]]; return { ...d, adaptiveRouting: { ...d.adaptiveRouting, rules } }; })} className="size-8 rounded border disabled:opacity-40">↑</button><button type="button" aria-label={`Move rule ${index + 1} down`} disabled={index === draft.adaptiveRouting.rules.length - 1} onClick={() => setDraft((d) => { const rules = [...d.adaptiveRouting.rules]; [rules[index + 1], rules[index]] = [rules[index], rules[index + 1]]; return { ...d, adaptiveRouting: { ...d.adaptiveRouting, rules } }; })} className="size-8 rounded border disabled:opacity-40">↓</button><button type="button" aria-label={`Remove rule ${index + 1}`} onClick={() => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: d.adaptiveRouting.rules.filter((r) => r.ruleId !== rule.ruleId) } }))} className="size-8 rounded border border-[#f1c9c4] text-[#922d21]">×</button></div></div>)}
-            </div><button onClick={() => saveEdit(link)} className="min-h-10 rounded-lg bg-[#429f24] px-4 text-sm font-semibold text-white sm:col-span-2">Save changes</button></div>}
+            <div className="space-y-2 sm:col-span-2"><div className="flex items-center justify-between gap-2"><div><p className="text-xs font-semibold text-[#526052]">Smart routing rules, top to bottom</p><p className="mt-1 text-xs text-[#718071]">Conditions use AND logic. First match wins; otherwise the default destination is used.</p></div><button type="button" onClick={() => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: [...d.adaptiveRouting.rules, createAdaptiveRule()] } }))} disabled={draft.adaptiveRouting.rules.length >= 20} className="min-h-9 rounded-lg border bg-white px-3 text-xs font-semibold text-[#295f22] disabled:opacity-50">Add rule</button></div>
+              {draft.adaptiveRouting.rules.map((rule, index) => <AdaptiveRuleEditor key={rule.ruleId} rule={rule} index={index} count={draft.adaptiveRouting.rules.length} onChange={(value) => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: d.adaptiveRouting.rules.map((row) => row.ruleId === rule.ruleId ? value : row) } }))} onMove={(direction) => setDraft((d) => { const rules = [...d.adaptiveRouting.rules]; [rules[index], rules[index + direction]] = [rules[index + direction], rules[index]]; return { ...d, adaptiveRouting: { ...d.adaptiveRouting, rules } }; })} onRemove={() => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: d.adaptiveRouting.rules.filter((row) => row.ruleId !== rule.ruleId) } }))} />)}
+            </div><button disabled={savingEdit} onClick={() => saveEdit(link)} className="min-h-10 rounded-lg bg-[#429f24] px-4 text-sm font-semibold text-white disabled:opacity-60 sm:col-span-2">{savingEdit ? 'Saving changes…' : 'Save changes'}</button></div>}
           {expanded === link.id && <LinkAnalytics analytics={linkAnalytics} routing={link.adaptiveRouting} loading={analyticsLoading} error={analyticsError} />}
           {expanded === `qr-${link.id}` && <div className="mt-4 max-w-[240px]"><QrCode value={link.shortUrl} name={`linkify-${link.shortCode}`} /></div>}
         </article>)}</div>}

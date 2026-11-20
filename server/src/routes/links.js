@@ -7,6 +7,10 @@ import ClickEvent from '../models/ClickEvent.js';
 function serializeLink(link, baseUrl) {
   const isCustomAlias = link.isCustomAlias ?? !/^[0-9a-zA-Z]{7}$/.test(link.shortCode);
   const adaptiveRouting = link.adaptiveRouting?.toObject?.() ?? link.adaptiveRouting;
+  const isoDate = (value) => {
+    const date = value ? new Date(value) : null;
+    return date && Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+  };
   return {
     id: link.id ?? link._id?.toString(), originalUrl: link.originalUrl,
     shortCode: link.shortCode, shortUrl: `${baseUrl}/${link.shortCode}`,
@@ -17,7 +21,16 @@ function serializeLink(link, baseUrl) {
       defaultDestinationUrl: adaptiveRouting.defaultDestinationUrl ?? link.originalUrl,
       defaultDestinationId: adaptiveRouting.defaultDestinationId ?? 'default',
       destinations: (adaptiveRouting.destinations ?? []).map(({ destinationId, ownerId, destinationUrl }) => ({ destinationId, ownerId, destinationUrl })),
-      rules: (adaptiveRouting.rules ?? []).map((rule, priority) => ({ ruleId: rule.ruleId, priority: rule.priority ?? priority, deviceType: rule.deviceType, destinationUrl: rule.destinationUrl, destinationId: rule.destinationId ?? `rule:${rule.ruleId}`, enabled: rule.enabled !== false })),
+      rules: (adaptiveRouting.rules ?? []).map((rule, priority) => ({
+        ruleId: rule.ruleId, priority: rule.priority ?? priority,
+        ...(rule.deviceType ? { deviceType: rule.deviceType } : {}),
+        ...(rule.countryCode ? { countryCode: rule.countryCode } : {}),
+        ...(isoDate(rule.startAt) ? { startAt: isoDate(rule.startAt) } : {}),
+        ...(isoDate(rule.endAt) ? { endAt: isoDate(rule.endAt) } : {}),
+        ...(rule.timeZone ? { timeZone: rule.timeZone } : {}),
+        ...(rule.campaign ? { campaign: { ...(rule.campaign.source ? { source: rule.campaign.source } : {}), ...(rule.campaign.medium ? { medium: rule.campaign.medium } : {}), ...(rule.campaign.campaign ? { campaign: rule.campaign.campaign } : {}) } } : {}),
+        destinationUrl: rule.destinationUrl, destinationId: rule.destinationId ?? `rule:${rule.ruleId}`, enabled: rule.enabled !== false,
+      })),
     } : { enabled: false, defaultDestinationUrl: link.originalUrl, defaultDestinationId: 'default', destinations: [], rules: [] },
   };
 }

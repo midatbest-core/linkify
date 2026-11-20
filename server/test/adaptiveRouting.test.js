@@ -5,6 +5,7 @@ import { normalizeAdaptiveRouting, resolveAdaptiveDestination } from '../src/ser
 import { createLinkService } from '../src/services/linkService.js';
 import Link from '../src/models/Link.js';
 import { createTestAuth } from './testAuth.js';
+import { localDateTimeToUtc, utcDateTimeToLocal } from '../src/utils/schedule.js';
 
 const routing = {
   enabled: true,
@@ -44,6 +45,56 @@ test('configuration validates protocols, device types, unique IDs and reorders p
   assert.ok(cleaned.destinations.every((entry) => !entry.destinationUrl.startsWith('javascript:')));
 });
 
+test('country, scheduled windows and exact UTM conditions combine with AND and preserve priority', () => {
+  const config = normalizeAdaptiveRouting({ enabled: true, defaultDestinationUrl: 'https://example.com/default', rules: [
+    { ruleId: 'campaign', deviceType: 'mobile', countryCode: 'in', startAt: '2025-01-01T00:00', endAt: '2025-12-31T23:59', timeZone: 'Asia/Kolkata', campaign: { source: 'Winter', medium: 'email' }, destinationUrl: 'https://example.com/campaign', enabled: true },
+    { ruleId: 'country', countryCode: 'IN', destinationUrl: 'https://example.com/india', enabled: true },
+    { ruleId: 'any-country', deviceType: 'desktop', destinationUrl: 'https://example.com/desktop', enabled: true },
+  ] });
+  assert.equal(config.error, undefined);
+  const normalized = config.value;
+  assert.equal(normalized.rules[0].countryCode, 'IN');
+  assert.ok(normalized.rules[0].startAt instanceof Date);
+  const at = new Date('2025-06-01T06:30:00.000Z');
+  const link = { originalUrl: normalized.defaultDestinationUrl, adaptiveRouting: normalized };
+  assert.equal(resolveAdaptiveDestination(link, { deviceType: 'mobile', countryCode: 'IN', now: at, query: { utm_source: 'Winter', utm_medium: 'email' } }).matchedRuleId, 'campaign');
+  assert.equal(resolveAdaptiveDestination(link, { deviceType: 'mobile', countryCode: 'IN', now: at, query: { utm_source: 'winter', utm_medium: 'email' } }).matchedRuleId, 'country');
+  assert.equal(resolveAdaptiveDestination(link, { deviceType: 'mobile', countryCode: null, now: at, query: { utm_source: 'Winter', utm_medium: 'email' } }).matchedRuleId, null);
+  assert.equal(resolveAdaptiveDestination(link, { deviceType: 'mobile', countryCode: 'IN', now: new Date('2026-01-01T00:00:00Z'), query: { utm_source: 'Winter', utm_medium: 'email' } }).matchedRuleId, 'country');
+  assert.equal(resolveAdaptiveDestination(link, { deviceType: 'unknown', countryCode: null, now: at, query: { utm_source: ['Winter'] } }).usedFallback, true);
+});
+
+test('schedule conversion handles IANA zones, DST folds and rejects DST gaps and invalid dates', () => {
+  assert.equal(localDateTimeToUtc('2025-01-15T09:00', 'Asia/Kolkata').toISOString(), '2025-01-15T03:30:00.000Z');
+  assert.equal(utcDateTimeToLocal('2025-01-15T03:30:00.000Z', 'Asia/Kolkata'), '2025-01-15T09:00');
+  assert.equal(localDateTimeToUtc('2024-03-10T02:30', 'America/New_York'), null);
+  assert.equal(localDateTimeToUtc('2024-11-03T01:30', 'America/New_York').toISOString(), '2024-11-03T05:30:00.000Z');
+  assert.equal(localDateTimeToUtc('2025-02-30T10:00', 'UTC'), null);
+  assert.equal(localDateTimeToUtc('2025-01-01T10:00', 'Not/AZone'), null);
+});
+
+test('start-only and end-only schedules activate automatically using inclusive start and exclusive end', () => {
+  const startOnly = normalizeAdaptiveRouting({ enabled: true, defaultDestinationUrl: 'https://example.com/default', rules: [{ ruleId: 'start', deviceType: 'mobile', startAt: '2025-01-01T00:00', timeZone: 'UTC', destinationUrl: 'https://example.com/start', enabled: true }] }).value;
+  const endOnly = normalizeAdaptiveRouting({ enabled: true, defaultDestinationUrl: 'https://example.com/default', rules: [{ ruleId: 'end', deviceType: 'mobile', endAt: '2025-01-01T00:00', timeZone: 'UTC', destinationUrl: 'https://example.com/end', enabled: true }] }).value;
+  const link = (adaptiveRouting) => ({ originalUrl: 'https://example.com/default', adaptiveRouting });
+  assert.equal(resolveAdaptiveDestination(link(startOnly), { deviceType: 'mobile', now: new Date('2024-12-31T23:59:59Z') }).usedFallback, true);
+  assert.equal(resolveAdaptiveDestination(link(startOnly), { deviceType: 'mobile', now: new Date('2025-01-01T00:00:00Z') }).matchedRuleId, 'start');
+  assert.equal(resolveAdaptiveDestination(link(endOnly), { deviceType: 'mobile', now: new Date('2024-12-31T23:59:59Z') }).matchedRuleId, 'end');
+  assert.equal(resolveAdaptiveDestination(link(endOnly), { deviceType: 'mobile', now: new Date('2025-01-01T00:00:00Z') }).usedFallback, true);
+});
+
+test('condition validation rejects invalid zones, date ordering, country and unsafe UTM values', () => {
+  const rule = { ruleId: 'rule', destinationUrl: 'https://example.com/rule', enabled: true };
+  const config = (candidate) => normalizeAdaptiveRouting({ enabled: true, defaultDestinationUrl: routing.defaultDestinationUrl, rules: [candidate] }).error;
+  assert.match(config({ ...rule, deviceType: 'mobile', timeZone: 'Not/AZone' }), /IANA time zone/);
+  assert.match(config({ ...rule, deviceType: 'mobile', startAt: '2025-02-01T00:00', endAt: '2025-01-01T00:00', timeZone: 'UTC' }), /end time must be after/);
+  assert.match(config({ ...rule, countryCode: 'USA' }), /two-letter/);
+  assert.match(config({ ...rule, campaign: { source: 'bad\nsource' } }), /UTM source/);
+  assert.match(config({ ...rule, deviceType: 'mobile', campaign: { source: 'x'.repeat(101) } }), /1–100 printable characters/);
+  assert.equal(normalizeAdaptiveRouting({ enabled: true, defaultDestinationUrl: routing.defaultDestinationUrl, rules: [{ ...rule, deviceType: 'mobile', campaign: { source: 'x'.repeat(100) } }] }).error, undefined);
+  assert.match(config({ ...rule }), /needs at least one condition/);
+});
+
 test('Mongoose casts and validates adaptive routing with nested rule and destination history IDs', () => {
   const adaptiveRouting = normalizeAdaptiveRouting(routing).value;
   const document = new Link({ originalUrl: adaptiveRouting.defaultDestinationUrl, shortCode: 'schema-check', adaptiveRouting });
@@ -51,16 +102,24 @@ test('Mongoose casts and validates adaptive routing with nested rule and destina
   assert.equal(document.adaptiveRouting.rules[0].ruleId, adaptiveRouting.rules[0].ruleId);
   assert.equal(document.adaptiveRouting.rules[0].destinationId, adaptiveRouting.rules[0].destinationId);
   assert.equal(document.adaptiveRouting.destinations[0].destinationId, adaptiveRouting.defaultDestinationId);
+  const smartConfig = normalizeAdaptiveRouting({ enabled: true, defaultDestinationUrl: 'https://example.com/default', rules: [{ ruleId: 'smart', countryCode: 'IN', startAt: '2025-01-01T00:00', timeZone: 'Asia/Kolkata', campaign: { source: 'mail' }, destinationUrl: 'https://example.com/smart', enabled: true }] }).value;
+  const smartDocument = new Link({ originalUrl: smartConfig.defaultDestinationUrl, shortCode: 'smart-schema', adaptiveRouting: smartConfig });
+  assert.equal(smartDocument.validateSync(), undefined);
+  assert.equal(smartDocument.adaptiveRouting.rules[0].countryCode, 'IN');
+  assert.equal(smartDocument.adaptiveRouting.rules[0].startAt.toISOString(), '2024-12-31T18:30:00.000Z');
+  assert.equal(smartDocument.adaptiveRouting.rules[0].campaign.source, 'mail');
+  assert.equal(resolveAdaptiveDestination(smartDocument, { deviceType: 'mobile', countryCode: 'IN', query: { utm_source: 'mail' }, now: new Date('2025-01-01T00:00:00.000Z') }).matchedRuleId, 'smart');
 });
 
 function memoryModels() {
   const links = new Map();
   const ids = new Map();
   const events = [];
+  let nextLinkId = 1;
   let holdAnalyticsWrite = false;
   const linkModel = {
     async exists({ shortCode }) { return links.has(shortCode) ? { _id: '000000000000000000000001' } : null; },
-    async create(record) { const saved = { ...record, id: '000000000000000000000001', _id: '000000000000000000000001' }; links.set(record.shortCode, saved); ids.set(saved.id, saved); return saved; },
+    async create(record) { const id = String(nextLinkId++).padStart(24, '0'); const saved = { ...record, id, _id: id }; links.set(record.shortCode, saved); ids.set(saved.id, saved); return saved; },
     async findOne({ shortCode }) { return links.get(shortCode) ?? null; },
     async findById(id) { return ids.get(String(id)) ?? null; },
     async findByIdAndUpdate(id, update) { const saved = ids.get(String(id)); if (!saved) return null; Object.assign(saved, update.$set); return saved; },
@@ -75,11 +134,12 @@ let api;
 let fixture;
 let models;
 let cookie;
+let geoLookup = async () => ({ countryName: 'Unknown', countryCode: null, region: null, cityName: null });
 
 before(async () => {
   models = memoryModels();
   fixture = createTestAuth();
-  server = createApp({ ...models, ...fixture }).listen(0);
+  server = createApp({ ...models, ...fixture, geoLocator: (...args) => geoLookup(...args) }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   api = `http://127.0.0.1:${server.address().port}`;
   cookie = await fixture.login(api);
@@ -101,6 +161,15 @@ test('authenticated API creates, retrieves, updates, reorders, disables and dele
   assert.equal(configOnlyCreate.status, 201);
   const configOnlyCreated = await configOnlyCreate.json();
   assert.equal(configOnlyCreated.originalUrl, 'https://example.com/default');
+
+  const smartCreate = await fetch(`${api}/api/links`, { method: 'POST', headers: { cookie, origin: 'http://localhost:5174', 'content-type': 'application/json' }, body: JSON.stringify({ customAlias: 'smart-conditions', adaptiveRouting: { enabled: true, defaultDestinationUrl: routing.defaultDestinationUrl, rules: [{ ruleId: 'india-spring', countryCode: 'in', startAt: '2025-01-15T09:00', endAt: '2025-02-15T09:00', timeZone: 'Asia/Kolkata', campaign: { source: 'Spring' }, destinationUrl: 'https://example.com/india', enabled: true }] } }) });
+  assert.equal(smartCreate.status, 201);
+  const smartCreated = await smartCreate.json();
+  assert.equal(smartCreated.adaptiveRouting.rules[0].countryCode, 'IN');
+  assert.equal(smartCreated.adaptiveRouting.rules[0].startAt, '2025-01-15T03:30:00.000Z');
+  assert.deepEqual(smartCreated.adaptiveRouting.rules[0].campaign, { source: 'Spring' });
+  const smartRead = await fetch(`${api}/api/links/${smartCreated.id}`, { headers: { cookie, origin: 'http://localhost:5174' } });
+  assert.equal((await smartRead.json()).link.adaptiveRouting.rules[0].timeZone, 'Asia/Kolkata');
 
   const changedRouting = { ...routing, rules: [...routing.rules].reverse() };
   const update = await fetch(`${api}/api/links/${created.id}`, { method: 'PATCH', headers: { cookie, origin: 'http://localhost:5174', 'content-type': 'application/json' }, body: JSON.stringify({ adaptiveRouting: changedRouting }) });
@@ -132,6 +201,8 @@ test('authenticated API creates, retrieves, updates, reorders, disables and dele
   assert.equal((await disable.json()).link.adaptiveRouting.enabled, false);
   const deletion = await fetch(`${api}/api/links/${configOnlyCreated.id}`, { method: 'DELETE', headers: { cookie, origin: 'http://localhost:5174' } });
   assert.equal(deletion.status, 200);
+  const smartDelete = await fetch(`${api}/api/links/${smartCreated.id}`, { method: 'DELETE', headers: { cookie, origin: 'http://localhost:5174' } });
+  assert.equal(smartDelete.status, 200);
   assert.equal((await fetch(`${api}/adaptive-config`, { redirect: 'manual' })).status, 404);
 });
 
@@ -163,6 +234,52 @@ test('redirects choose UA-derived device destinations and record exactly one att
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(disabled.headers.get('location'), 'https://example.com/default');
   assert.equal(models.events.at(-1).selectedDestinationId, 'default');
+});
+
+test('Express redirects use trusted GeoIP plus explicit case-sensitive UTM query values and safely fall back', async () => {
+  const link = models.links.get('adaptive-link');
+  const now = new Date();
+  const before = new Date(now.getTime() - 60_000).toISOString().slice(0, 16);
+  const after = new Date(now.getTime() + 60_000).toISOString().slice(0, 16);
+  link.adaptiveRouting = normalizeAdaptiveRouting({ enabled: true, defaultDestinationUrl: 'https://example.com/default', rules: [
+    { ruleId: 'india-campaign', countryCode: 'IN', startAt: before, endAt: after, timeZone: 'UTC', campaign: { source: 'Launch', medium: 'email' }, destinationUrl: 'https://example.com/launch', enabled: true },
+  ] }).value;
+  geoLookup = async (ip) => ip === '198.51.100.5' ? { countryName: 'India', countryCode: 'IN', region: null, cityName: null } : { countryName: 'Unknown', countryCode: null, region: null, cityName: null };
+  const response = await fetch(`${api}/adaptive-link?utm_source=Launch&utm_medium=email`, { headers: { 'cf-connecting-ip': '198.51.100.5', 'user-agent': 'test client' }, redirect: 'manual' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get('location'), 'https://example.com/launch');
+  assert.equal(models.events.at(-1).matchedRuleId, 'india-campaign');
+  assert.equal(models.events.at(-1).countryCode, 'IN');
+  assert.equal(Object.hasOwn(models.events.at(-1), 'ip'), false);
+  assert.equal(Object.hasOwn(models.events.at(-1), 'userAgent'), false);
+
+  const mismatched = await fetch(`${api}/adaptive-link?utm_source=launch&utm_medium=email`, { headers: { 'cf-connecting-ip': '198.51.100.5' }, redirect: 'manual' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(mismatched.headers.get('location'), 'https://example.com/default');
+  assert.equal(models.events.at(-1).usedFallback, true);
+
+  geoLookup = async () => { throw new Error('database offline'); };
+  const geoFailure = await fetch(`${api}/adaptive-link?utm_source=Launch&utm_medium=email`, { headers: { 'cf-connecting-ip': '198.51.100.5' }, redirect: 'manual' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(geoFailure.status, 302);
+  assert.equal(geoFailure.headers.get('location'), 'https://example.com/default');
+  geoLookup = async () => ({ countryName: 'Unknown', countryCode: null, region: null, cityName: null });
+});
+
+test('redirect loop targets fall back safely or return 410 when the default also loops', async () => {
+  const safe = { _id: 'loop-safe', shortCode: 'loop-safe', originalUrl: 'https://example.com/safe', status: 'active', adaptiveRouting: { enabled: true, defaultDestinationUrl: 'https://example.com/safe', defaultDestinationId: 'default-safe', rules: [{ ruleId: 'self', priority: 0, deviceType: 'mobile', enabled: true, destinationUrl: `${api}/loop-safe`, destinationId: 'self-destination' }] } };
+  models.links.set(safe.shortCode, safe);
+  const fallback = await fetch(`${api}/loop-safe`, { headers: { 'user-agent': 'Mobile' }, redirect: 'manual' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(fallback.status, 302);
+  assert.equal(fallback.headers.get('location'), 'https://example.com/safe');
+  assert.equal(models.events.at(-1).usedFallback, true);
+
+  const trapped = { ...safe, shortCode: 'loop-trap', originalUrl: `${api}/loop-trap`, adaptiveRouting: { ...safe.adaptiveRouting, defaultDestinationUrl: `${api}/loop-trap` } };
+  models.links.set(trapped.shortCode, trapped);
+  const rejected = await fetch(`${api}/loop-trap`, { redirect: 'manual' });
+  assert.equal(rejected.status, 410);
 });
 
 test('redirect does not wait for a pending analytics database write', async () => {

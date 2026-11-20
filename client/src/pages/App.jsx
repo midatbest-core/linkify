@@ -4,6 +4,7 @@ import ShortLinkResult from '../components/ShortLinkResult.jsx';
 import StatusMessage from '../components/StatusMessage.jsx';
 import LinkDashboard from '../components/LinkDashboard.jsx';
 import { UTM_KEYS, buildUtmPreview } from '../utils/utm.js';
+import { firstInvalidAdaptiveRule, getAdaptiveRuleUrlError } from '../utils/adaptiveRoutingValidation.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
 
@@ -59,6 +60,8 @@ function MainApp({ onLogout }) {
   const [title, setTitle] = useState('');
   const [tags, setTags] = useState('');
   const [utm, setUtm] = useState({});
+  const [routingMode, setRoutingMode] = useState('standard');
+  const [adaptiveRules, setAdaptiveRules] = useState([]);
   const [urlError, setUrlError] = useState('');
   const [link, setLink] = useState(null);
   const [feedback, setFeedback] = useState(null);
@@ -110,6 +113,13 @@ function MainApp({ onLogout }) {
       setFeedback(null);
       return;
     }
+    if (routingMode === 'adaptive') {
+      const invalidRule = firstInvalidAdaptiveRule(adaptiveRules);
+      if (invalidRule) {
+        setFeedback({ tone: 'error', text: `Rule ${invalidRule.index + 1}: ${invalidRule.message}` });
+        return;
+      }
+    }
 
     aliasRequestId.current += 1;
     setIsChecking(false);
@@ -120,6 +130,7 @@ function MainApp({ onLogout }) {
     setCopyState('idle');
 
     const payload = { originalUrl: originalUrl.trim() };
+    if (routingMode === 'adaptive') payload.adaptiveRouting = { enabled: true, defaultDestinationUrl: originalUrl.trim(), rules: adaptiveRules.map(({ ruleId, deviceType, destinationUrl, enabled }) => ({ ruleId, deviceType, destinationUrl, enabled })) };
     if (customAlias.trim()) payload.customAlias = customAlias.trim();
     if (title.trim()) payload.title = title.trim();
     if (tags.trim()) payload.tags = tags.split(',').map((value) => value.trim()).filter(Boolean);
@@ -203,7 +214,7 @@ function MainApp({ onLogout }) {
 
           <form className="mt-8 space-y-4 rounded-[22px] border border-[#e2ebdd] bg-white p-4 shadow-[0_22px_60px_-38px_rgba(8,22,14,0.32)] sm:mt-9 sm:space-y-5 sm:rounded-[26px] sm:p-6" onSubmit={shortenLink} noValidate>
             <div>
-              <label className="mb-2 block text-sm font-semibold text-[#08160e]" htmlFor="destination-url">Destination URL</label>
+                <label className="mb-2 block text-sm font-semibold text-[#08160e]" htmlFor="destination-url">{routingMode === 'adaptive' ? 'Default destination URL' : 'Destination URL'}</label>
               <div className={`flex min-h-12 items-center rounded-xl border bg-[#fcfdfb] px-3.5 transition focus-within:ring-2 focus-within:ring-[#429f24]/30 ${urlError ? 'border-[#c75c50]' : 'border-[#dfe8dc] focus-within:border-[#429f24]'}`}>
                 <svg viewBox="0 0 24 24" fill="none" className="mr-2.5 size-[18px] shrink-0 text-[#7c8979]" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path strokeLinecap="round" strokeLinejoin="round" d="M3.5 9h17M3.5 15h17M12 3c2.2 2.4 3.2 5.4 3.2 9s-1 6.6-3.2 9c-2.2-2.4-3.2-5.4-3.2-9s1-6.6 3.2-9Z" /></svg>
                 <input
@@ -226,6 +237,23 @@ function MainApp({ onLogout }) {
               {originalUrl.trim() && <p className="mt-2 break-all rounded-lg bg-[#f5f9f2] p-2 text-xs leading-5 text-[#526052]">Final destination preview: {utmPreview.url || 'Enter a valid HTTP or HTTPS destination URL.'}</p>}
               {utmPreview.conflicts.length > 0 && <p className="mt-1 text-xs text-[#922d21]">Existing UTM values are preserved and will not be overwritten: {utmPreview.conflicts.join(', ')}.</p>}
             </div>
+
+            <fieldset className="rounded-xl border border-[#e2ebdd] bg-[#fbfdf9] p-3 sm:p-4">
+              <legend className="px-1 text-sm font-semibold text-[#08160e]">Link type</legend>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setRoutingMode('standard')} aria-pressed={routingMode === 'standard'} className={`min-h-10 rounded-lg border px-3 text-sm font-semibold ${routingMode === 'standard' ? 'border-[#429f24] bg-[#e9f5e3] text-[#295f22]' : 'border-[#dfe8dc] bg-white text-[#526052]'}`}>Standard link</button>
+                <button type="button" onClick={() => setRoutingMode('adaptive')} aria-pressed={routingMode === 'adaptive'} className={`min-h-10 rounded-lg border px-3 text-sm font-semibold ${routingMode === 'adaptive' ? 'border-[#429f24] bg-[#e9f5e3] text-[#295f22]' : 'border-[#dfe8dc] bg-white text-[#526052]'}`}>Adaptive link</button>
+              </div>
+            </fieldset>
+
+            {routingMode === 'adaptive' && <section className="space-y-3 rounded-xl border border-[#dce8d6] bg-[#f8fbf6] p-3 sm:p-4" aria-label="Adaptive destination rules">
+              <div className="flex flex-wrap items-start justify-between gap-2"><div><h2 className="text-sm font-semibold">Device routing rules</h2><p className="mt-1 text-xs text-[#718071]">Rules are checked from top to bottom. The default destination is used if none match.</p></div><button type="button" onClick={() => setAdaptiveRules((rules) => [...rules, { ruleId: crypto.randomUUID(), deviceType: 'mobile', destinationUrl: '', enabled: true }])} disabled={adaptiveRules.length >= 20} className="min-h-9 rounded-lg border border-[#cddfc5] bg-white px-3 text-xs font-semibold text-[#295f22] disabled:opacity-50">Add rule</button></div>
+              {adaptiveRules.length === 0 ? <p className="rounded-lg border border-dashed border-[#cddfc5] bg-white p-3 text-sm text-[#718071]">No rules yet. Visitors will use the default destination.</p> : adaptiveRules.map((rule, index) => <div key={rule.ruleId} className="grid min-w-0 gap-2 rounded-lg border border-[#e2ebdd] bg-white p-3 sm:grid-cols-[minmax(0,130px)_minmax(0,1fr)_auto] sm:items-end">
+                <label className="text-xs font-semibold text-[#526052]">Rule {index + 1}<select value={rule.deviceType} onChange={(event) => setAdaptiveRules((rows) => rows.map((row) => row.ruleId === rule.ruleId ? { ...row, deviceType: event.target.value } : row))} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] px-2 text-sm font-normal"><option value="mobile">Mobile</option><option value="desktop">Desktop</option><option value="tablet">Tablet</option></select></label>
+                <label className="min-w-0 text-xs font-semibold text-[#526052]">Destination URL<input type="url" required aria-invalid={Boolean(getAdaptiveRuleUrlError(rule.destinationUrl))} value={rule.destinationUrl} onChange={(event) => setAdaptiveRules((rows) => rows.map((row) => row.ruleId === rule.ruleId ? { ...row, destinationUrl: event.target.value } : row))} placeholder="https://example.com/mobile" className="mt-1 min-h-10 w-full min-w-0 rounded-lg border border-[#dfe8dc] px-3 text-sm font-normal" />{getAdaptiveRuleUrlError(rule.destinationUrl) && <span className="mt-1 block text-xs font-normal text-[#922d21]">{getAdaptiveRuleUrlError(rule.destinationUrl)}</span>}</label>
+                <div className="flex items-center gap-1 sm:pb-0"><label className="flex min-h-10 items-center gap-1 text-xs"><input type="checkbox" checked={rule.enabled} onChange={(event) => setAdaptiveRules((rows) => rows.map((row) => row.ruleId === rule.ruleId ? { ...row, enabled: event.target.checked } : row))} />Enabled</label><button type="button" aria-label={`Move rule ${index + 1} up`} disabled={index === 0} onClick={() => setAdaptiveRules((rows) => { const next = [...rows]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next; })} className="grid size-9 place-items-center rounded border disabled:opacity-40">↑</button><button type="button" aria-label={`Move rule ${index + 1} down`} disabled={index === adaptiveRules.length - 1} onClick={() => setAdaptiveRules((rows) => { const next = [...rows]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; return next; })} className="grid size-9 place-items-center rounded border disabled:opacity-40">↓</button><button type="button" aria-label={`Remove rule ${index + 1}`} onClick={() => setAdaptiveRules((rows) => rows.filter((row) => row.ruleId !== rule.ruleId))} className="grid size-9 place-items-center rounded border border-[#f1c9c4] text-[#922d21]">×</button></div>
+              </div>)}
+            </section>}
 
             <div>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">

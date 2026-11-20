@@ -6,11 +6,19 @@ import ClickEvent from '../models/ClickEvent.js';
 
 function serializeLink(link, baseUrl) {
   const isCustomAlias = link.isCustomAlias ?? !/^[0-9a-zA-Z]{7}$/.test(link.shortCode);
+  const adaptiveRouting = link.adaptiveRouting?.toObject?.() ?? link.adaptiveRouting;
   return {
     id: link.id ?? link._id?.toString(), originalUrl: link.originalUrl,
     shortCode: link.shortCode, shortUrl: `${baseUrl}/${link.shortCode}`,
     isCustomAlias, title: link.title ?? '', tags: link.tags ?? [],
     status: link.status ?? 'active', createdAt: link.createdAt, updatedAt: link.updatedAt ?? null,
+    adaptiveRouting: adaptiveRouting ? {
+      enabled: adaptiveRouting.enabled === true,
+      defaultDestinationUrl: adaptiveRouting.defaultDestinationUrl ?? link.originalUrl,
+      defaultDestinationId: adaptiveRouting.defaultDestinationId ?? 'default',
+      destinations: (adaptiveRouting.destinations ?? []).map(({ destinationId, ownerId, destinationUrl }) => ({ destinationId, ownerId, destinationUrl })),
+      rules: (adaptiveRouting.rules ?? []).map((rule, priority) => ({ ruleId: rule.ruleId, priority: rule.priority ?? priority, deviceType: rule.deviceType, destinationUrl: rule.destinationUrl, destinationId: rule.destinationId ?? `rule:${rule.ruleId}`, enabled: rule.enabled !== false })),
+    } : { enabled: false, defaultDestinationUrl: link.originalUrl, defaultDestinationId: 'default', destinations: [], rules: [] },
   };
 }
 
@@ -82,7 +90,7 @@ export function createLinksRouter({ linkModel = Link, clickEventModel = ClickEve
       const baseUrl = (process.env.SHORT_BASE_URL ?? `${request.protocol}://${request.get('host')}`).replace(/\/$/, '');
       response.json({ link: serializeLink(link, baseUrl) });
     } catch (error) {
-      if (error.status === 400) return response.status(400).json({ error: error.message });
+      if (error.status === 400 || error.status === 409) return response.status(error.status).json({ error: error.message });
       next(error);
     }
   });
@@ -115,6 +123,7 @@ export function createLinksRouter({ linkModel = Link, clickEventModel = ClickEve
         utmConflicts,
         createdAt: link.createdAt,
         updatedAt: link.updatedAt ?? null,
+        adaptiveRouting: serializeLink(link, baseUrl).adaptiveRouting,
       });
     } catch (error) {
       if (error instanceof AliasConflictError) {

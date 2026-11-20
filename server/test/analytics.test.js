@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createApp } from '../src/app.js';
 import { createGeoLocator } from '../src/services/geoIpService.js';
-import { buildLinkAnalyticsPipeline } from '../src/services/analyticsService.js';
+import { buildLinkAnalyticsPipeline, formatLinkAnalytics } from '../src/services/analyticsService.js';
 import { parseDateRange } from '../src/utils/dateRange.js';
 import { classifyClickRequest } from '../src/utils/clickClassification.js';
 import { appendUtmParameters } from '../src/utils/utm.js';
@@ -237,6 +237,7 @@ test('link analytics API returns metrics and builds indexed date-group aggregati
     selectedTotal: [{ count: 5 }], daily: [{ _id: '2025-03-03', count: 5 }],
     devices: [{ _id: 'mobile', count: 4 }], browsers: [{ _id: 'Safari', count: 3 }],
     operatingSystems: [{ _id: 'iOS', count: 3 }], referrers: [{ _id: 'news.example', count: 4 }],
+    destinations: [{ _id: { destinationId: 'rule:mobile-first', matchedRuleId: 'mobile-first', usedFallback: false }, clicks: 3 }, { _id: { destinationId: 'default', matchedRuleId: null, usedFallback: true }, clicks: 2 }],
     bots: [{ _id: true, count: 1 }, { _id: false, count: 4 }],
   }];
   const response = await adminFetch(`${baseUrl}/api/links/${LINK_ID}/analytics?from=2025-03-01&to=2025-03-07`);
@@ -247,10 +248,32 @@ test('link analytics API returns metrics and builds indexed date-group aggregati
   assert.equal(data.analytics.dailyClicks.length, 7);
   assert.equal(data.analytics.dailyClicks.find((row) => row._id === '2025-03-01').count, 0);
   assert.deepEqual(data.analytics.deviceBreakdown, { mobile: 4 });
+  assert.deepEqual(data.analytics.destinations, [
+    { destinationId: 'rule:mobile-first', matchedRuleId: 'mobile-first', usedFallback: false, clicks: 3 },
+    { destinationId: 'default', matchedRuleId: null, usedFallback: true, clicks: 2 },
+  ]);
+  assert.equal(data.analytics.fallbackClicks, 2);
+  assert.deepEqual(data.analytics.ruleClicks, [{ ruleId: 'mobile-first', clicks: 3 }]);
+  assert.ok(lastPipeline[1].$facet.destinations);
   assert.deepEqual(data.analytics.botBreakdown, { bots: 1, nonBots: 4, estimated: true });
   const dailyFacet = lastPipeline[1].$facet.daily;
   assert.deepEqual(dailyFacet[0].$match.clickedAt, { $gte: new Date('2025-03-01T00:00:00Z'), $lt: new Date('2025-03-08T00:00:00Z') });
   assert.equal(dailyFacet[1].$group._id.$dateToString.timezone, 'UTC');
+});
+
+test('destination aggregation retains legacy, adaptive fallback, and deleted-rule click attribution', () => {
+  const pipeline = buildLinkAnalyticsPipeline(LINK_ID, parseDateRange({ from: '2025-03-01', to: '2025-03-07' }));
+  const destinationGroup = pipeline[1].$facet.destinations[1].$group._id;
+  assert.deepEqual(destinationGroup.destinationId, { $ifNull: ['$selectedDestinationId', 'default'] });
+  assert.deepEqual(destinationGroup.usedFallback, { $ifNull: ['$usedFallback', true] });
+  const analytics = formatLinkAnalytics([{ destinations: [
+    { _id: { destinationId: 'default', matchedRuleId: null, usedFallback: true }, clicks: 2 },
+    { _id: { destinationId: 'archived-destination-id', matchedRuleId: 'deleted-rule', usedFallback: false }, clicks: 3 },
+    { _id: { destinationId: 'adaptive-default-id', matchedRuleId: null, usedFallback: true }, clicks: 4 },
+  ] }], parseDateRange({ from: '2025-03-01', to: '2025-03-07' }));
+  assert.equal(analytics.fallbackClicks, 6);
+  assert.deepEqual(analytics.ruleClicks, [{ ruleId: 'deleted-rule', clicks: 3 }]);
+  assert.equal(analytics.destinations.find((row) => row.destinationId === 'archived-destination-id').clicks, 3);
 });
 
 test('analytics endpoints handle invalid IDs, missing links, and malformed date ranges', async () => {

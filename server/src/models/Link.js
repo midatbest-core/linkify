@@ -2,6 +2,26 @@ import mongoose from 'mongoose';
 
 const linkSchema = new mongoose.Schema({
   originalUrl: { type: String, required: true },
+  adaptiveRouting: {
+    enabled: { type: Boolean, default: false },
+    defaultDestinationUrl: { type: String, default: null },
+    defaultDestinationId: { type: String, default: null },
+    destinations: [{
+      _id: false,
+      destinationId: { type: String, required: true },
+      ownerId: { type: String, required: true },
+      destinationUrl: { type: String, required: true },
+    }],
+    rules: [{
+      _id: false,
+      ruleId: { type: String, required: true },
+      priority: { type: Number, required: true, min: 0 },
+      deviceType: { type: String, enum: ['mobile', 'desktop', 'tablet'], required: true },
+      destinationUrl: { type: String, required: true },
+      destinationId: { type: String, required: true },
+      enabled: { type: Boolean, default: true },
+    }],
+  },
   shortCode: { type: String, required: true, unique: true },
   isCustomAlias: { type: Boolean },
   title: { type: String, trim: true, maxlength: 120, default: '' },

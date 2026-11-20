@@ -77,7 +77,7 @@ export function OverviewAnalytics({ analytics, loading, error }) {
   </div>;
 }
 
-export function LinkAnalytics({ analytics, loading, error }) {
+export function LinkAnalytics({ analytics, routing, loading, error }) {
   if (loading) return <p className="mt-4 text-sm text-[#526052]" role="status">Loading link analytics…</p>;
   if (error) return <p className="mt-4 text-sm text-[#922d21]" role="alert">{error}</p>;
   if (!analytics) return null;
@@ -88,9 +88,19 @@ export function LinkAnalytics({ analytics, loading, error }) {
     ['Last 7 days', analytics.clicksLast7Days],
     ['Last 30 days', analytics.clicksLast30Days],
   ];
+  const destinations = analytics.destinations ?? [];
+  const showDestinations = Boolean(routing?.enabled || (destinations.length && (routing?.destinations?.length || routing?.rules?.length)));
+  const labelForDestination = (destination) => {
+    const history = routing?.destinations?.find((entry) => entry.destinationId === destination.destinationId);
+    if (history?.ownerId === 'default' || destination.destinationId === 'default') return `Default · ${history?.destinationUrl ?? routing?.defaultDestinationUrl ?? ''}`;
+    const ruleId = history?.ownerId ?? destination.matchedRuleId;
+    const rule = routing?.rules?.find((entry) => entry.ruleId === ruleId);
+    return `${rule?.deviceType ?? 'Rule'} · ${history?.destinationUrl ?? rule?.destinationUrl ?? destination.destinationId}`;
+  };
   return <div className="mt-4 space-y-3 border-t border-[#e2ebdd] pt-4">
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">{metricCards.map(([label, value]) => <div key={label} className="rounded-lg bg-[#f5f9f2] p-3"><p className="text-[11px] text-[#718071]">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></div>)}</div>
     <DailyChart rows={analytics.dailyClicks} />
+    {showDestinations && <section className="rounded-xl border border-[#e2ebdd] bg-white p-4"><h3 className="text-sm font-semibold text-[#295f22]">Clicks by destination</h3><p className="mt-1 text-xs text-[#718071]">Fallback clicks: {analytics.fallbackClicks ?? 0}</p>{destinations.length ? <ul className="mt-3 space-y-2">{destinations.map((destination) => <li key={destination.destinationId} className="flex min-w-0 items-start justify-between gap-3 text-sm"><span className="min-w-0 break-all text-[#526052]">{labelForDestination(destination)}</span><strong className="shrink-0">{destination.clicks}</strong></li>)}</ul> : <p className="mt-2 text-sm text-[#718071]">No destination clicks in this date range.</p>}</section>}
     <CountryBreakdown countries={analytics.countries} regions={analytics.regions} cities={analytics.cities} />
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><Breakdown title="Devices" data={analytics.deviceBreakdown} /><Breakdown title="Browsers" data={analytics.browserBreakdown} /><Breakdown title="Operating systems" data={analytics.operatingSystemBreakdown} /><Breakdown title="Top referrers" data={Object.fromEntries(analytics.topReferrers.map((item) => [item.hostname, item.clicks]))} /><Breakdown title="Bot estimate" data={{ bots: analytics.botBreakdown.bots, 'non-bots': analytics.botBreakdown.nonBots }} /></div>
   </div>;

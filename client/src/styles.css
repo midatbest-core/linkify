@@ -117,3 +117,12 @@ button:enabled { cursor: pointer; }
   .qr-action > div { position: static; width: min(100%, 16rem); }
   .qr-action[open] { flex-basis: 100%; }
 }
+.overview-details > summary { min-height: 44px; }
+.link-actions[open] { grid-column: 1 / -1; flex-basis: 100%; }
+.app-topbar { position: relative; }
+@media (max-width: 420px) {
+  .app-topbar > div { gap: 4px; padding-inline: 8px; }
+  .app-topbar > div > a { gap: 6px; }
+  .app-topbar > div > a > span:last-child { font-size: .875rem; }
+  .app-topbar .nav-pill { padding-inline: 5px; font-size: .72rem; }
+}

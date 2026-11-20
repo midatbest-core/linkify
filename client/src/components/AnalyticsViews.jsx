@@ -56,7 +56,7 @@ export function DateRange({ from, to, onChange }) {
   return <div className="panel flex flex-wrap items-end gap-3 p-3 sm:p-4">
     <label className="text-xs font-semibold text-[#526052]">From (UTC)<input type="date" value={from} max={to} onChange={(e) => onChange('from', e.target.value)} className="mt-1 block min-h-10 rounded-lg border border-[#dfe8dc] px-2 text-sm font-normal text-[#08160e]" /></label>
     <label className="text-xs font-semibold text-[#526052]">To (UTC)<input type="date" value={to} min={from} onChange={(e) => onChange('to', e.target.value)} className="mt-1 block min-h-10 rounded-lg border border-[#dfe8dc] px-2 text-sm font-normal text-[#08160e]" /></label>
-    <span className="pb-2 text-xs text-[#718071]">Daily buckets use UTC.</span>
+    <span className="pb-2 text-xs text-[#718071]">Dates include the full day in UTC. Overview metrics use this range.</span>
   </div>;
 }
 
@@ -71,11 +71,13 @@ export function OverviewAnalytics({ analytics, loading, error }) {
   ];
   return <div className="space-y-4">
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{summary.map(([label, value]) => <div key={label} className="panel p-4 sm:p-5"><p className="text-xs font-medium text-muted">{label}</p><p className="mt-2 break-words text-2xl font-semibold tracking-tight text-ink">{value}</p></div>)}</div>
+    {!analytics?.totalClicks ? <p className="rounded-xl bg-canvas-subtle p-4 text-sm text-muted">No clicks in this date range. Choose other dates or share a link to begin.</p> : <details className="overview-details"><summary className="button-secondary cursor-pointer">Explore overview analytics</summary><div className="mt-4 space-y-4">
     <DailyChart rows={analytics?.dailyClicks} title="Clicks over selected dates" />
     <div className="grid gap-3 md:grid-cols-2"><Breakdown title="Devices" data={analytics?.deviceBreakdown} /><Breakdown title="Top referrers" data={Object.fromEntries((analytics?.topReferrers ?? []).map((item) => [item.hostname, item.clicks]))} /></div>
     <CountryBreakdown countries={analytics?.countries} regions={analytics?.regions} cities={analytics?.cities} label="Overview geographic analytics" />
     <div className="grid gap-3 md:grid-cols-2"><div className="rounded-xl border border-[#e2ebdd] bg-white p-4"><h3 className="text-sm font-semibold text-[#295f22]">Top-performing links</h3>{analytics?.topLinks?.length ? <ol className="mt-3 space-y-2">{analytics.topLinks.slice(0, 5).map((link) => <li key={link.linkId} className="flex justify-between gap-3 text-sm"><span className="truncate">{link.title || link.shortCode}</span><strong>{link.clicks}</strong></li>)}</ol> : <p className="mt-3 text-sm text-[#718071]">No clicks recorded for this date range.</p>}</div>
       <div className="rounded-xl border border-[#e2ebdd] bg-white p-4"><h3 className="text-sm font-semibold text-[#295f22]">Recently created links</h3>{analytics?.recentlyCreatedLinks?.length ? <ol className="mt-3 space-y-2">{analytics.recentlyCreatedLinks.slice(0, 5).map((link) => <li key={link.id} className="flex justify-between gap-3 text-sm"><span className="truncate">{link.title || link.shortCode}</span><time className="shrink-0 text-xs text-[#718071]">{link.createdAt ? new Date(link.createdAt).toLocaleDateString() : ''}</time></li>)}</ol> : <p className="mt-3 text-sm text-[#718071]">No links created yet.</p>}</div></div>
+    </div></details>}
     <p className="rounded-xl bg-canvas-subtle p-3 text-xs leading-5 text-muted">Click counts are redirect requests, not unique visitors or conversions. Device, browser, OS and bot categories are estimates. Declared UTM values come from link setup; observed referrers are hostnames derived from the browser's referrer header and are separate signals.</p>
   </div>;
 }
@@ -106,11 +108,13 @@ export function LinkAnalytics({ analytics, routing, loading, error }) {
     ].filter(Boolean).join(' AND ') || (rule ? 'Always-on rule' : 'Rule');
     return `${conditions} · ${history?.destinationUrl ?? rule?.destinationUrl ?? destination.destinationId}`;
   };
-  return <div className="mt-4 space-y-3 border-t border-[#e2ebdd] pt-4">
+  return <div className="mt-4 space-y-3 border-t border-[#e2ebdd] pt-4"><p className="text-xs text-muted">Retained redirects cover up to 365 days of stored events. Selected range follows the dashboard dates. The count on the link card is its lifetime total.</p>
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">{metricCards.map(([label, value]) => <div key={label} className="panel p-3"><p className="text-[11px] text-muted">{label}</p><p className="mt-1 text-xl font-semibold tracking-tight text-ink">{value}</p></div>)}</div>
+    {analytics.clicksInRange === 0 ? <p className="rounded-xl bg-canvas-subtle p-4 text-sm text-muted">No clicks in the selected range. Choose other dates to explore this link.</p> : <>
     <DailyChart rows={analytics.dailyClicks} />
     {showDestinations && <section className="rounded-xl border border-[#e2ebdd] bg-white p-4"><h3 className="text-sm font-semibold text-[#295f22]">Clicks by destination</h3><p className="mt-1 text-xs text-[#718071]">Fallback clicks: {analytics.fallbackClicks ?? 0}</p>{destinations.length ? <ul className="mt-3 space-y-2">{destinations.map((destination) => <li key={destination.destinationId} className="flex min-w-0 items-start justify-between gap-3 text-sm"><span className="min-w-0 break-all text-[#526052]">{labelForDestination(destination)}</span><strong className="shrink-0">{destination.clicks}</strong></li>)}</ul> : <p className="mt-2 text-sm text-[#718071]">No destination clicks in this date range.</p>}</section>}
     <CountryBreakdown countries={analytics.countries} regions={analytics.regions} cities={analytics.cities} label="Link geographic analytics" />
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><Breakdown title="Devices" data={analytics.deviceBreakdown} /><Breakdown title="Browsers" data={analytics.browserBreakdown} /><Breakdown title="Operating systems" data={analytics.operatingSystemBreakdown} /><Breakdown title="Top referrers" data={Object.fromEntries(analytics.topReferrers.map((item) => [item.hostname, item.clicks]))} /><Breakdown title="Bot estimate" data={{ bots: analytics.botBreakdown.bots, 'non-bots': analytics.botBreakdown.nonBots }} /></div>
+    </>}
   </div>;
 }

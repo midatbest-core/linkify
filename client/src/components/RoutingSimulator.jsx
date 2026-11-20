@@ -12,13 +12,13 @@ export default function RoutingSimulator({ link, onClose }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   async function simulate(event) {
-    event.preventDefault(); setLoading(true); setError(''); setResult(null);
+    event.preventDefault(); setLoading(true); setError('');
     try {
       const response = await fetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}/simulate`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceType, countryCode, now: new Date(time).toISOString(), query: Object.fromEntries(Object.entries(query).filter(([, value]) => value)) }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Could not simulate this route.');
       setResult(data.simulation);
-    } catch (cause) { setError(cause.message || 'Could not reach Linkify.'); }
+    } catch (cause) { setResult(null); setError(cause.message || 'Could not reach Linkify.'); }
     finally { setLoading(false); }
   }
   return <section className="mt-4 rounded-2xl border border-[#cbdcc2] bg-[#f7faf4] p-4 sm:p-5" aria-labelledby="simulator-title">
@@ -31,6 +31,6 @@ export default function RoutingSimulator({ link, onClose }) {
       <div className="flex items-end"><button disabled={loading} type="submit" className="button-primary min-h-11 w-full">{loading ? 'Simulating…' : 'Simulate route'}</button></div>
     </form>
     {error && <p role="alert" className="mt-3 rounded-xl bg-[#fff4f0] p-3 text-sm text-danger">{error}</p>}
-    {result && <div className="mt-4 rounded-xl border border-line bg-surface p-4" aria-live="polite"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="eyebrow">RESULT</p><p className="mt-1 text-sm font-semibold">{result.matchedRule ? `Matched rule ${result.matchedRule.priority + 1} · ${result.matchedRule.ruleId}` : 'Default destination'}</p></div><span className={`status-pill ${result.usedFallback ? 'status-off' : 'status-on'}`}>{result.usedFallback ? 'Fallback' : 'Rule matched'}</span></div><p className="mt-3 break-all text-sm font-medium text-ink">{result.destinationUrl}</p>{result.fallbackReason && <p className="mt-2 text-xs text-muted">{result.fallbackReason}</p>}<p className="mt-3 border-t border-line pt-3 text-[11px] text-muted">{result.note}</p></div>}
+    {result && <div aria-busy={loading} data-outcome={result.usedFallback ? "fallback" : "match"} className="simulation-result mt-4 rounded-xl border p-4" aria-live="polite"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="eyebrow">RESULT</p><p className="mt-1 text-sm font-semibold">{result.matchedRule ? `Matched rule ${result.matchedRule.priority + 1} · ${result.matchedRule.ruleId}` : 'Default destination'}</p></div><span className={`status-pill ${result.usedFallback ? 'status-off' : 'status-on'}`}>{result.usedFallback ? 'Fallback' : 'Rule matched'}</span></div><p className="mt-3 break-all text-sm font-medium text-ink">{result.destinationUrl}</p>{result.fallbackReason && <p className="mt-2 text-xs text-muted">{result.fallbackReason}</p>}<p className="mt-3 border-t border-line pt-3 text-[11px] text-muted">{result.note}</p></div>}
   </section>;
 }

@@ -35,7 +35,7 @@ export default function AdaptiveRuleEditor({ rule, index, count, onChange, onMov
   const campaign = rule.campaign ?? {};
   const summary = getAdaptiveRuleSummary({ ...rule, priority: index });
   const conditionSummary = summary.split('; priority')[0].replace(/^Disabled; /, '');
-  return <article className={`rule-card ${rule.enabled ? '' : 'rule-disabled'}`}>
+  return <article data-expanded={expanded} className={`rule-card ${rule.enabled ? '' : 'rule-disabled'}`}>
     <div className="flex flex-wrap items-center gap-3 p-3 sm:p-4">
       <span className="priority-pill" aria-label={`Priority ${index + 1}`}>{String(index + 1).padStart(2, '0')}</span>
       <div className="min-w-0 flex-1">

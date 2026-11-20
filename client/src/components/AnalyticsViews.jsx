@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { formatAnalyticsLabel, formatCountryName } from '../utils/analyticsDisplay.js';
 
 function metricEntries(data) {
@@ -5,6 +6,8 @@ function metricEntries(data) {
 }
 
 export function DailyChart({ rows = [], title = 'Daily clicks' }) {
+  const [activeDay, setActiveDay] = useState(null);
+  const active = rows.find((row) => row._id === activeDay);
   const max = Math.max(1, ...rows.map((row) => row.count));
   const width = 640;
   const height = 190;
@@ -12,13 +15,13 @@ export function DailyChart({ rows = [], title = 'Daily clicks' }) {
   const barWidth = Math.max(1, (width - barGap * Math.max(0, rows.length - 1)) / Math.max(1, rows.length));
   const labelEvery = Math.max(1, Math.ceil(rows.length / 7));
   return <div className="panel min-w-0 p-4 sm:p-5">
-    <div className="flex flex-wrap items-end justify-between gap-2"><h2 className="text-sm font-semibold text-ink">{title}</h2><span className="text-xs text-muted">Daily totals (UTC)</span></div>
+    <div className="flex flex-wrap items-end justify-between gap-2"><h2 className="text-sm font-semibold text-ink">{title}</h2><span className="text-xs text-muted">{active ? `${active._id} · ${active.count} clicks` : 'Daily totals (UTC)'}</span></div>
     {!rows.some((row) => row.count > 0) ? <div className="my-4 rounded-xl bg-canvas-subtle px-4 py-8 text-center"><p className="text-sm font-medium text-ink">No activity in this range</p><p className="mt-1 text-xs text-muted">Redirect totals will appear here when a link is visited.</p></div> : <svg className="mt-3 h-44 w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} bar chart`}>
       {rows.map((row, index) => {
         const barHeight = row.count === 0 ? 0 : Math.max(2, (row.count / max) * 130);
         const x = index * (barWidth + barGap);
         const label = row._id.slice(5);
-        return <g key={row._id}><title>{`${row._id}: ${row.count} clicks`}</title><rect className="chart-bar" x={x} y={145 - barHeight} width={barWidth} height={barHeight} rx="3" fill="#367c36" opacity="0.9" />{index % labelEvery === 0 && <text x={x} y="170" fontSize="10" fill="#6d786f">{label}</text>}</g>;
+        return <g key={row._id} tabIndex={row.count ? 0 : undefined} aria-label={`${row._id}: ${row.count} clicks`} onPointerEnter={() => setActiveDay(row._id)} onPointerLeave={() => setActiveDay(null)} onFocus={() => setActiveDay(row._id)} onBlur={() => setActiveDay(null)}><title>{`${row._id}: ${row.count} clicks`}</title><rect className="chart-bar" x={x} y={145 - barHeight} width={barWidth} height={barHeight} rx="3" fill="#367c36" opacity="0.9" />{index % labelEvery === 0 && <text x={x} y="170" fontSize="10" fill="#6d786f">{label}</text>}</g>;
       })}
       <line x1="0" y1="145" x2={width} y2="145" stroke="#dfe8dc" />
     </svg>}

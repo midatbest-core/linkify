@@ -51,3 +51,25 @@ test('session records expire in Mongo and credential rotation rejects existing s
   assert.equal(authorized, false);
   assert.equal(response.statusCode, 401);
 });
+
+test('logout reports storage failures without clearing the cookie or claiming invalidation', async () => {
+  const fixture = createTestAuth();
+  const storageError = new Error('session store unavailable');
+  const auth = createAdminAuth({
+    ...fixture,
+    username: fixture.adminUsername,
+    passwordHash: fixture.adminPasswordHash,
+    sessionModel: { async deleteOne() { throw storageError; } },
+  });
+  const response = {
+    headers: {},
+    setHeader(name, value) { this.headers[name] = value; },
+    json(body) { this.body = body; return this; },
+    status(code) { this.statusCode = code; return this; },
+  };
+  let failure;
+  await auth.logout({ headers: { cookie: 'linkify_admin=active-session' } }, response, (error) => { failure = error; });
+  assert.equal(failure, storageError);
+  assert.equal(response.headers['Set-Cookie'], undefined);
+  assert.equal(response.body, undefined);
+});

@@ -118,7 +118,13 @@ export function createLinksRouter({ linkModel = Link, clickEventModel = ClickEve
       const rule = result.matchedRuleId && link.adaptiveRouting?.rules?.find((entry) => entry.ruleId === result.matchedRuleId);
       response.json({ simulation: {
         ...result,
-        matchedRule: rule ? { ruleId: rule.ruleId, priority: rule.priority, destinationUrl: rule.destinationUrl } : null,
+        matchedRule: rule ? { ruleId: rule.ruleId, priority: rule.priority, destinationUrl: rule.destinationUrl,
+          conditions: {
+            deviceType: rule.deviceType, countryCode: rule.countryCode,
+            startAt: rule.startAt, endAt: rule.endAt, timeZone: rule.timeZone,
+            campaign: rule.campaign,
+          },
+        } : null,
         fallbackReason: result.usedFallback ? 'No enabled rule matched the supplied conditions; the default destination was selected.' : null,
         note: 'Simulation only. This does not represent a real visitor lookup and does not record a click.',
       } });

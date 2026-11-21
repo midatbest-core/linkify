@@ -1,16 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import QrCode from './QrCode.jsx';
 import { DateRange, LinkAnalytics, OverviewAnalytics } from './AnalyticsViews.jsx';
 import AdaptiveRuleEditor, { createAdaptiveRule, prepareAdaptiveRule } from './AdaptiveRuleEditor.jsx';
 import RoutingSimulator from './RoutingSimulator.jsx';
 import { firstInvalidAdaptiveRule, serializeAdaptiveRule } from '../utils/adaptiveRoutingValidation.js';
+import { authenticatedFetch } from '../utils/authenticatedFetch.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
-async function apiFetch(url, options) {
-  const response = await fetch(url, { credentials: 'include', ...options });
-  if (response.status === 401) window.dispatchEvent(new Event('linkify:unauthorized'));
-  return response;
-}
 const utcToday = () => new Date().toISOString().slice(0, 10);
 function dateDaysAgo(days) { const date = new Date(); date.setUTCDate(date.getUTCDate() - days); return date.toISOString().slice(0, 10); }
 
@@ -22,6 +18,20 @@ export default function LinkDashboard({ onCreateLink, initialExpanded = null }) 
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [query, setQuery] = useState('');
+  const [search, setSearch] = useState('');
+  const announcementTimer = useRef(null);
+  const searchInput = useRef(null);
+  const simulatorButtons = useRef(new Map());
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(query), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+  useEffect(() => () => clearTimeout(announcementTimer.current), []);
+  function announce(message) {
+    clearTimeout(announcementTimer.current);
+    setNotice('');
+    announcementTimer.current = setTimeout(() => setNotice(message), 60);
+  }
   const [status, setStatus] = useState('all');
   const [tag, setTag] = useState('');
   const [sort, setSort] = useState('createdAt');
@@ -44,70 +54,77 @@ export default function LinkDashboard({ onCreateLink, initialExpanded = null }) 
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     async function loadLinks() {
       setLoading(true); setError('');
-      const params = new URLSearchParams({ q: query, status, sort, order, page: String(page), limit: '50' });
+      const params = new URLSearchParams({ q: search, status, sort, order, page: String(page), limit: '50' });
       if (tag.trim()) params.set('tag', tag.trim());
       try {
-        const response = await apiFetch(`${API_URL}/api/links?${params}`);
+        const response = await authenticatedFetch(`${API_URL}/api/links?${params}`, { signal: controller.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? 'Could not load links.');
         if (!cancelled) { setLinks(data.links ?? []); setPagination(data.pagination ?? { page, limit: 50, total: data.links?.length ?? 0, totalPages: 1 }); }
-      } catch (e) { if (!cancelled) setError(e.message || 'Could not reach Linkify.'); }
+      } catch (e) { if (!cancelled && e.name !== 'AbortError') setError(e.message || 'Could not reach Linkify.'); }
       finally { if (!cancelled) setLoading(false); }
     }
     loadLinks();
-    return () => { cancelled = true; };
-  }, [query, status, tag, sort, order, page]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [search, status, tag, sort, order, page]);
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     async function loadOverview() {
       setOverviewLoading(true); setOverviewError('');
       const params = new URLSearchParams(range);
       try {
-        const response = await apiFetch(`${API_URL}/api/analytics/overview?${params}`);
+        const response = await authenticatedFetch(`${API_URL}/api/analytics/overview?${params}`, { signal: controller.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? 'Could not load overview analytics.');
         if (!cancelled) setOverview(data.analytics);
-      } catch (e) { if (!cancelled) setOverviewError(e.message || 'Could not reach Linkify.'); }
+      } catch (e) { if (!cancelled && e.name !== 'AbortError') setOverviewError(e.message || 'Could not reach Linkify.'); }
       finally { if (!cancelled) setOverviewLoading(false); }
     }
     loadOverview();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, [range]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!expanded || expanded.startsWith('qr-')) { setLinkAnalytics(null); return () => { cancelled = true; }; }
+    const controller = new AbortController();
+    if (!expanded || expanded.startsWith('qr-')) { setLinkAnalytics(null); return () => { cancelled = true; controller.abort(); }; }
     async function loadAnalytics() {
       setAnalyticsLoading(true); setAnalyticsError('');
       const params = new URLSearchParams(range);
       try {
-        const response = await apiFetch(`${API_URL}/api/links/${encodeURIComponent(expanded)}/analytics?${params}`);
+        const response = await authenticatedFetch(`${API_URL}/api/links/${encodeURIComponent(expanded)}/analytics?${params}`, { signal: controller.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? 'Could not load link analytics.');
         if (!cancelled) setLinkAnalytics(data.analytics);
-      } catch (e) { if (!cancelled) setAnalyticsError(e.message || 'Could not reach Linkify.'); }
+      } catch (e) { if (!cancelled && e.name !== 'AbortError') setAnalyticsError(e.message || 'Could not reach Linkify.'); }
       finally { if (!cancelled) setAnalyticsLoading(false); }
     }
     loadAnalytics();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, [expanded, range]);
+
+  useEffect(() => { setLinkAnalytics(null); }, [expanded]);
 
   function changeRange(key, value) { setRange((current) => ({ ...current, [key]: value })); }
   async function copy(link) {
-    try { await navigator.clipboard.writeText(link.shortUrl); setCopied(link.id); setNotice('Short link copied.'); setTimeout(() => setCopied(null), 1800); }
+    setError('');
+    try { await navigator.clipboard.writeText(link.shortUrl); setCopied(link.id); announce('Short link copied.'); setTimeout(() => setCopied(null), 1800); }
     catch { setError('Could not copy automatically. Select and copy the short URL.'); }
   }
   async function remove(link) {
     if (!window.confirm(`Delete ${link.shortUrl}? Anyone using this short link will no longer be redirected.`)) return;
+    setError('');
     try {
-      const response = await apiFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, { method: 'DELETE' });
+      const response = await authenticatedFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, { method: 'DELETE' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Could not delete this link.');
       setLinks((current) => current.filter((item) => item.id !== link.id));
-      setNotice('Link deleted.');
+      announce('Link deleted.'); searchInput.current?.focus();
       setPagination((current) => { const total = Math.max(0, current.total - 1); return { ...current, total, totalPages: Math.ceil(total / current.limit) }; });
       if (links.length === 1 && page > 1) setPage((current) => current - 1);
       if (expanded === link.id) setExpanded(null);
@@ -126,15 +143,15 @@ export default function LinkDashboard({ onCreateLink, initialExpanded = null }) 
     }
     setSavingEdit(true);
     try {
-      const response = await apiFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, {
+      const response = await authenticatedFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ originalUrl: draft.originalUrl, title: draft.title, tags: draft.tags.split(',').map((value) => value.trim()).filter(Boolean), adaptiveRouting: { ...draft.adaptiveRouting, defaultDestinationUrl: draft.originalUrl, rules: draft.adaptiveRouting.rules.map(serializeAdaptiveRule) } }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Could not update this link.');
       setEditing(null);
-      setNotice('Changes saved.');
-      if (status !== 'all' && status !== nextStatus) {
+      announce('Changes saved.');
+      if (status !== 'all' && status !== data.link.status) {
         setLinks((current) => current.filter((item) => item.id !== link.id));
         setPagination((current) => { const total = Math.max(0, current.total - 1); return { ...current, total, totalPages: Math.ceil(total / current.limit) }; });
         if (links.length === 1 && page > 1) setPage((current) => current - 1);
@@ -144,12 +161,13 @@ export default function LinkDashboard({ onCreateLink, initialExpanded = null }) 
   }
   async function toggleArchive(link) {
     const nextStatus = link.status === 'archived' ? 'active' : 'archived';
+    setError('');
     try {
-      const response = await apiFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: nextStatus }) });
+      const response = await authenticatedFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: nextStatus }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Could not change link status.');
       setLinks((current) => current.map((item) => item.id === link.id ? { ...item, ...data.link } : item));
-      setNotice(nextStatus === 'archived' ? 'Link archived.' : 'Link restored.');
+      announce(nextStatus === 'archived' ? 'Link archived.' : 'Link restored.');
     } catch (e) { setError(e.message || 'Could not reach Linkify.'); }
   }
 
@@ -163,15 +181,16 @@ export default function LinkDashboard({ onCreateLink, initialExpanded = null }) 
     <div className="mt-10 flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-2xl font-semibold tracking-tight">All links <span className="ml-1 rounded-full bg-brand-soft px-2 py-1 align-middle text-xs text-brand">{pagination.total}</span></h2><p className="mt-2 text-sm text-muted">Search, filter and manage destinations.</p></div>
       <div className="flex flex-wrap gap-2"><label className="text-xs font-medium text-[#526052]">Status<select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="ml-2 min-h-10 rounded-lg border border-[#dfe8dc] bg-white px-2 text-sm"><option value="all">All</option><option value="active">Active</option><option value="archived">Archived</option></select></label><label className="text-xs font-medium text-[#526052]">Sort<select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} className="ml-2 min-h-10 rounded-lg border border-[#dfe8dc] bg-white px-2 text-sm"><option value="createdAt">Created</option><option value="clicks">Clicks</option></select></label><button onClick={() => { setOrder((value) => value === 'desc' ? 'asc' : 'desc'); setPage(1); }} className="min-h-10 rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm" aria-label={order === 'desc' ? 'Newest / most' : 'Oldest / least'}>{order === 'desc' ? 'Newest / most' : 'Oldest / least'}</button></div>
     </div>
-    <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_240px]"><label><span className="sr-only">Search by title, alias or destination</span><input value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Search links, aliases or destinations" className="field-control mt-0 min-h-12 px-4" /></label><label><span className="sr-only">Filter by tag</span><input value={tag} onChange={(e) => { setTag(e.target.value); setPage(1); }} placeholder="Filter by tag" className="field-control mt-0 min-h-12 px-4" /></label></div>
+    <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_240px]"><label><span className="sr-only">Search by title, alias or destination</span><input ref={searchInput} value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Search links, aliases or destinations" className="field-control mt-0 min-h-12 px-4" /></label><label><span className="sr-only">Filter by tag</span><input value={tag} onChange={(e) => { setTag(e.target.value); setPage(1); }} placeholder="Filter by tag" className="field-control mt-0 min-h-12 px-4" /></label></div>
     {error && <p className="mt-4 rounded-xl border border-[#f1c9c4] bg-[#fff7f5] px-4 py-3 text-sm text-[#922d21]" role="alert">{error}</p>}
-    {notice && <p className="mt-3 rounded-xl border border-[#cbdcc2] bg-[#f3f7ef] px-4 py-3 text-sm text-brand-strong" role="status">{notice}</p>}
+    <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{notice}</span><p aria-hidden="true" hidden={!notice} className="mt-3 rounded-xl border border-[#cbdcc2] bg-[#f3f7ef] px-4 py-3 text-sm text-brand-strong" >{notice}</p>
+    {loading && links.length > 0 && <p className="mt-3 text-xs text-muted" role="status">Updating links…</p>}
     {loading && links.length === 0 ? <div className="mt-5 space-y-3" role="status" aria-label="Loading links">{[0,1,2].map((item) => <div key={item} className="panel space-y-3 p-5"><div className="skeleton h-5 w-1/3 rounded"/><div className="skeleton h-4 w-2/3 rounded"/><div className="skeleton h-10 w-full rounded-xl"/></div>)}<span className="sr-only">Loading your links</span></div>
       : links.length === 0 ? <div className="panel mt-5 border-dashed p-8 text-center sm:p-12"><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-brand-soft text-2xl text-brand" aria-hidden="true">+</span><h3 className="mt-4 text-lg font-semibold">{query || tag || status !== 'all' ? 'No matching links' : 'Your first link is one paste away'}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted">{query || tag || status !== 'all' ? 'Try another search or filter.' : 'Create a short link, choose a custom alias, and start tracking redirect activity.'}</p>{query || tag || status !== 'all' ? <button className="button-secondary mt-4" onClick={() => { setQuery(''); setTag(''); setStatus('all'); }}>Clear filters</button> : <button className="button-primary mt-5" onClick={onCreateLink}>Create your first link</button>}</div>
-        : <div aria-label="Links" aria-busy={loading} inert={loading || undefined} className="link-list mt-4 space-y-3">{links.map((link) => <article key={link.id} className="link-card panel min-w-0 p-4 sm:p-5">
+        : <div aria-label="Links" aria-busy={loading} className="link-list mt-4 space-y-3">{links.map((link) => <article key={link.id} className="link-card panel min-w-0 p-4 sm:p-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-base font-semibold text-[#08160e]">{link.title || link.shortCode}</h3><span className={`rounded-full px-2 py-0.5 text-xs ${link.status === 'archived' ? 'bg-[#f3eee7] text-[#6b5945]' : 'bg-[#e9f5e3] text-[#295f22]'}`}>{link.status === 'archived' ? 'Archived' : 'Active'}</span>{link.adaptiveRouting?.enabled && <span className="rounded-full bg-[#e8f2ff] px-2 py-0.5 text-xs font-medium text-[#315c8a]">Adaptive</span>}<span className="text-xs text-[#718071]">{link.clickCount ?? 0} clicks</span></div><a href={link.shortUrl} target="_blank" rel="noreferrer" className="mt-2 block break-all text-sm font-semibold text-[#295f22] underline decoration-[#9dce87] underline-offset-4">{link.shortUrl}</a><p className="mt-2 break-all text-sm text-[#526052]">{link.originalUrl}</p><p className="mt-2 text-xs text-[#718071]">{link.isCustomAlias ? `Custom alias · ${link.shortCode}` : 'Random code'} <span className="mx-1">·</span>{link.createdAt ? new Date(link.createdAt).toLocaleDateString() : 'Date unavailable'}{link.tags?.length ? <span className="ml-2">{link.tags.map((value) => <span key={value} className="mr-1 inline-block rounded bg-[#f1f5ef] px-1.5 py-0.5">{value}</span>)}</span> : null}</p></div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:flex xl:shrink-0"><button onClick={() => copy(link)} className="button-secondary min-h-10 px-3 text-xs">{copied === link.id ? '✓ Copied' : 'Copy'}</button><button onClick={() => setExpanded(expanded === link.id ? null : link.id)} aria-expanded={expanded === link.id} className="button-secondary min-h-10 px-3 text-xs">{expanded === link.id ? 'Hide analytics' : 'Analytics'}</button><button onClick={() => setSimulatorFor(simulatorFor === link.id ? null : link.id)} aria-expanded={simulatorFor === link.id} className="button-secondary min-h-10 px-3 text-xs">{simulatorFor === link.id ? 'Hide simulator' : 'Simulate'}</button><details className="link-actions"><summary className="button-secondary min-h-11 cursor-pointer px-3 text-xs">More actions</summary><div className="mt-2 flex flex-wrap gap-2"><button onClick={() => editing === link.id ? setEditing(null) : beginEdit(link)} className="button-secondary min-h-10 px-3 text-xs">{editing === link.id ? 'Cancel edit' : 'Edit'}</button><button onClick={() => toggleArchive(link)} className="button-secondary min-h-10 px-3 text-xs">{link.status === 'archived' ? 'Restore' : 'Archive'}</button><button onClick={() => remove(link)} className="button-danger min-h-10 px-3 text-xs">Delete</button><button onClick={() => setExpanded(expanded === `qr-${link.id}` ? null : `qr-${link.id}`)} className="button-secondary min-h-10 px-3 text-xs">QR code</button></div></details></div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:flex xl:shrink-0"><button onClick={() => copy(link)} className="button-secondary min-h-10 px-3 text-xs">{copied === link.id ? '✓ Copied' : 'Copy'}</button><button onClick={() => setExpanded(expanded === link.id ? null : link.id)} aria-expanded={expanded === link.id} className="button-secondary min-h-10 px-3 text-xs">{expanded === link.id ? 'Hide analytics' : 'Analytics'}</button><button ref={(node) => { if (node) simulatorButtons.current.set(link.id, node); else simulatorButtons.current.delete(link.id); }} onClick={() => setSimulatorFor(simulatorFor === link.id ? null : link.id)} aria-expanded={simulatorFor === link.id} className="button-secondary min-h-10 px-3 text-xs">{simulatorFor === link.id ? 'Hide simulator' : 'Simulate'}</button><details className="link-actions"><summary className="button-secondary min-h-11 cursor-pointer px-3 text-xs">More actions</summary><div className="mt-2 flex flex-wrap gap-2"><button onClick={() => editing === link.id ? setEditing(null) : beginEdit(link)} className="button-secondary min-h-10 px-3 text-xs">{editing === link.id ? 'Cancel edit' : 'Edit'}</button><button onClick={() => toggleArchive(link)} className="button-secondary min-h-10 px-3 text-xs">{link.status === 'archived' ? 'Restore' : 'Archive'}</button><button onClick={() => remove(link)} className="button-danger min-h-10 px-3 text-xs">Delete</button><button onClick={() => setExpanded(expanded === `qr-${link.id}` ? null : `qr-${link.id}`)} className="button-secondary min-h-10 px-3 text-xs">QR code</button></div></details></div>
           </div>
           {editing === link.id && <div className="mt-4 grid gap-3 rounded-xl bg-[#f8fbf6] p-3 sm:grid-cols-2"><label className="text-xs font-semibold text-[#526052]">Title<input value={draft.title} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} maxLength={120} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm font-normal" /></label><label className="text-xs font-semibold text-[#526052]">Tags, comma separated<input value={draft.tags} onChange={(e) => setDraft((d) => ({ ...d, tags: e.target.value }))} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm font-normal" /></label><label className="text-xs font-semibold text-[#526052] sm:col-span-2">Default destination URL<input type="url" value={draft.originalUrl} onChange={(e) => setDraft((d) => ({ ...d, originalUrl: e.target.value, adaptiveRouting: { ...d.adaptiveRouting, defaultDestinationUrl: e.target.value } }))} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm font-normal" /></label>
             <label className="flex min-h-10 items-center gap-2 text-sm font-semibold sm:col-span-2"><input type="checkbox" checked={draft.adaptiveRouting.enabled} onChange={(e) => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, enabled: e.target.checked } }))} />Enable adaptive routing</label>
@@ -179,7 +198,7 @@ export default function LinkDashboard({ onCreateLink, initialExpanded = null }) 
               {draft.adaptiveRouting.rules.map((rule, index) => <AdaptiveRuleEditor key={rule.ruleId} rule={rule} index={index} count={draft.adaptiveRouting.rules.length} onChange={(value) => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: d.adaptiveRouting.rules.map((row) => row.ruleId === rule.ruleId ? value : row) } }))} onMove={(direction) => setDraft((d) => { const rules = [...d.adaptiveRouting.rules]; [rules[index], rules[index + direction]] = [rules[index + direction], rules[index]]; return { ...d, adaptiveRouting: { ...d.adaptiveRouting, rules } }; })} onRemove={() => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: d.adaptiveRouting.rules.filter((row) => row.ruleId !== rule.ruleId) } }))} />)}
             </div><button disabled={savingEdit} onClick={() => saveEdit(link)} className="min-h-10 rounded-lg bg-[#429f24] px-4 text-sm font-semibold text-white disabled:opacity-60 sm:col-span-2">{savingEdit ? 'Saving changes…' : 'Save changes'}</button></div>}
           {expanded === link.id && <LinkAnalytics analytics={linkAnalytics} routing={link.adaptiveRouting} loading={analyticsLoading} error={analyticsError} />}
-          {simulatorFor === link.id && <RoutingSimulator link={link} onClose={() => setSimulatorFor(null)} />}
+          {simulatorFor === link.id && <RoutingSimulator link={link} onClose={() => { setSimulatorFor(null); requestAnimationFrame(() => simulatorButtons.current.get(link.id)?.focus()); }} />}
           {expanded === `qr-${link.id}` && <div className="mt-4 max-w-[240px]"><QrCode value={link.shortUrl} name={`linkify-${link.shortCode}`} /></div>}
         </article>)}</div>}
     {pagination.totalPages > 1 && <nav className="mt-5 flex items-center justify-between" aria-label="Link pages"><button disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="min-h-10 rounded-lg border border-[#dce8d6] px-4 text-sm font-semibold text-[#295f22] disabled:opacity-40">Previous</button><span className="text-sm text-[#526052]">Page {page} of {pagination.totalPages}</span><button disabled={page >= pagination.totalPages} onClick={() => setPage((value) => value + 1)} className="min-h-10 rounded-lg border border-[#dce8d6] px-4 text-sm font-semibold text-[#295f22] disabled:opacity-40">Next</button></nav>}

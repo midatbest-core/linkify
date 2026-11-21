@@ -247,8 +247,16 @@ test('authenticated routing simulation reuses rule priority without writing clic
   assert.equal(response.status, 200);
   const result = (await response.json()).simulation;
   assert.equal(result.matchedRule.ruleId, 'mobile-first');
+  assert.equal(result.matchedRule.conditions.deviceType, 'mobile');
   assert.equal(result.destinationUrl, 'https://example.com/mobile');
   assert.equal(result.note.includes('does not record a click'), true);
+  assert.equal(models.events.length, before);
+  const fallbackResponse = await fetch(`${api}/api/links/${link._id}/simulate`, { method: 'POST', headers: { cookie, origin: 'http://localhost:5174', 'content-type': 'application/json' }, body: JSON.stringify({ ...body, deviceType: 'tablet' }) });
+  const fallback = (await fallbackResponse.json()).simulation;
+  assert.equal(fallback.matchedRule, null);
+  assert.equal(fallback.usedFallback, true);
+  assert.equal(fallback.destinationUrl, 'https://example.com/default');
+  assert.match(fallback.fallbackReason, /default destination/);
   assert.equal(models.events.length, before);
   const invalid = await fetch(`${api}/api/links/${link._id}/simulate`, { method: 'POST', headers: { cookie, origin: 'http://localhost:5174', 'content-type': 'application/json' }, body: JSON.stringify({ ...body, deviceType: 'smart-tv' }) });
   assert.equal(invalid.status, 400);

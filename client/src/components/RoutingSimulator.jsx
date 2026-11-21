@@ -1,3 +1,4 @@
+import { authenticatedFetch } from '../utils/authenticatedFetch.js';
 import { useState } from 'react';
 import { getAdaptiveRuleSummary } from '../utils/adaptiveRoutingValidation.js';
 
@@ -15,10 +16,10 @@ export default function RoutingSimulator({ link, onClose }) {
   async function simulate(event) {
     event.preventDefault(); setLoading(true); setError('');
     try {
-      const response = await fetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}/simulate`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceType, countryCode, now: new Date(time).toISOString(), query: Object.fromEntries(Object.entries(query).filter(([, value]) => value)) }) });
+      const response = await authenticatedFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}/simulate`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceType, countryCode, now: new Date(time).toISOString(), query: Object.fromEntries(Object.entries(query).filter(([, value]) => value)) }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Could not simulate this route.');
-      const matchedRule = link.adaptiveRouting?.rules?.find((rule) => rule.ruleId === data.simulation.matchedRule?.ruleId);
+      const matchedRule = data.simulation.matchedRule?.conditions;
       setResult({ ...data.simulation, conditionSummary: matchedRule ? getAdaptiveRuleSummary(matchedRule).split('; priority')[0] : null });
     } catch (cause) { setResult(null); setError(cause.message || 'Could not reach Linkify.'); }
     finally { setLoading(false); }

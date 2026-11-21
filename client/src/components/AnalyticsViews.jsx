@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { formatAnalyticsLabel, formatCountryName } from '../utils/analyticsDisplay.js';
 
 function metricEntries(data) {
@@ -7,6 +7,7 @@ function metricEntries(data) {
 
 export function DailyChart({ rows = [], title = 'Daily clicks' }) {
   const [activeDay, setActiveDay] = useState(null);
+  const descriptionId = useId();
   const active = rows.find((row) => row._id === activeDay);
   const max = Math.max(1, ...rows.map((row) => row.count));
   const width = 640;
@@ -14,18 +15,34 @@ export function DailyChart({ rows = [], title = 'Daily clicks' }) {
   const barGap = rows.length > 45 ? 0 : 5;
   const barWidth = Math.max(1, (width - barGap * Math.max(0, rows.length - 1)) / Math.max(1, rows.length));
   const labelEvery = Math.max(1, Math.ceil(rows.length / 7));
-  return <div className="panel min-w-0 p-4 sm:p-5">
+  function moveActive(direction) {
+    if (!rows.length) return;
+    const current = Math.max(0, rows.findIndex((row) => row._id === activeDay));
+    const next = (current + direction + rows.length) % rows.length;
+    setActiveDay(rows[next]._id);
+  }
+  function handleChartKeyDown(event) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === 'Home') setActiveDay(rows[0]?._id ?? null);
+    else if (event.key === 'End') setActiveDay(rows.at(-1)?._id ?? null);
+    else moveActive(event.key === 'ArrowRight' ? 1 : -1);
+  }
+  return <figure className="panel min-w-0 p-4 sm:p-5">
     <div className="flex flex-wrap items-end justify-between gap-2"><h2 className="text-sm font-semibold text-ink">{title}</h2><span className="text-xs text-muted">{active ? `${active._id} · ${active.count} clicks` : 'Daily totals (UTC)'}</span></div>
-    {!rows.some((row) => row.count > 0) ? <div className="my-4 rounded-xl bg-canvas-subtle px-4 py-8 text-center"><p className="text-sm font-medium text-ink">No activity in this range</p><p className="mt-1 text-xs text-muted">Redirect totals will appear here when a link is visited.</p></div> : <svg className="mt-3 h-44 w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} bar chart`}>
+    {!rows.some((row) => row.count > 0) ? <div className="my-4 rounded-xl bg-canvas-subtle px-4 py-8 text-center"><p className="text-sm font-medium text-ink">No activity in this range</p><p className="mt-1 text-xs text-muted">Redirect totals will appear here when a link is visited.</p></div> : <svg className="mt-3 h-44 w-full" viewBox={`0 0 ${width} ${height}`} role="group" tabIndex="0" aria-label={`${title} interactive bar chart`} aria-describedby={descriptionId} onFocus={() => setActiveDay((value) => value ?? rows.find((row) => row.count > 0)?._id ?? rows[0]?._id)} onBlur={() => setActiveDay(null)} onKeyDown={handleChartKeyDown}>
       {rows.map((row, index) => {
         const barHeight = row.count === 0 ? 0 : Math.max(2, (row.count / max) * 130);
         const x = index * (barWidth + barGap);
         const label = row._id.slice(5);
-        return <g key={row._id} tabIndex={row.count ? 0 : undefined} aria-label={`${row._id}: ${row.count} clicks`} onPointerEnter={() => setActiveDay(row._id)} onPointerLeave={() => setActiveDay(null)} onFocus={() => setActiveDay(row._id)} onBlur={() => setActiveDay(null)}><title>{`${row._id}: ${row.count} clicks`}</title><rect className="chart-bar" x={x} y={145 - barHeight} width={barWidth} height={barHeight} rx="3" fill="#367c36" opacity="0.9" />{index % labelEvery === 0 && <text x={x} y="170" fontSize="10" fill="#6d786f">{label}</text>}</g>;
+        return <g aria-hidden="true" key={row._id} onPointerEnter={() => setActiveDay(row._id)} onPointerLeave={() => setActiveDay(null)}><rect className="chart-bar" x={x} y={145 - barHeight} width={barWidth} height={barHeight} rx="3" fill="#367c36" opacity={activeDay && activeDay !== row._id ? '0.55' : '0.9'} />{index % labelEvery === 0 && <text x={x} y="170" fontSize="10" fill="#6d786f">{label}</text>}</g>;
       })}
       <line x1="0" y1="145" x2={width} y2="145" stroke="#dfe8dc" />
     </svg>}
-  </div>;
+    <figcaption id={descriptionId} className="sr-only">Daily click totals in UTC. Use Left and Right Arrow, Home, or End while the chart is focused to inspect dates.</figcaption>
+    {active && <span className="sr-only" role="status" aria-live="polite">{active._id}: {active.count} clicks</span>}
+    <table className="sr-only"><caption>{title} data</caption><thead><tr><th scope="col">UTC date</th><th scope="col">Clicks</th></tr></thead><tbody>{rows.map((row) => <tr key={row._id}><th scope="row">{row._id}</th><td>{row.count}</td></tr>)}</tbody></table>
+  </figure>;
 }
 
 export function Breakdown({ title, data }) {
@@ -61,30 +78,31 @@ export function DateRange({ from, to, onChange }) {
 }
 
 export function OverviewAnalytics({ analytics, loading, error }) {
-  if (loading) return <p className="rounded-xl border border-[#e2ebdd] bg-white p-6 text-center text-sm text-[#526052]" role="status">Loading analytics…</p>;
-  if (error) return <p className="rounded-xl border border-[#f1c9c4] bg-[#fff7f5] p-4 text-sm text-[#922d21]" role="alert">{error}</p>;
+  if (loading && !analytics) return <p className="rounded-xl border border-[#e2ebdd] bg-white p-6 text-center text-sm text-[#526052]" role="status">Loading analytics…</p>;
+  if (error && !analytics) return <p className="rounded-xl border border-[#f1c9c4] bg-[#fff7f5] p-4 text-sm text-[#922d21]" role="alert">{error}</p>;
   const summary = [
     ['Clicks in range', analytics?.totalClicks ?? 0],
     ['Days with activity', analytics?.dailyClicks?.filter((row) => row.count > 0).length ?? 0],
     ['Top referrer', analytics?.topReferrers?.[0]?.hostname ?? '—'],
     ['Top device', formatAnalyticsLabel(metricEntries(analytics?.deviceBreakdown)[0]?.[0], '—')],
   ];
-  return <div className="space-y-4">
+  return <div className="space-y-4" aria-busy={loading}><p role="status" className="min-h-5 text-xs text-muted">{loading ? "Updating analytics..." : ""}</p>{error && <p role="alert" className="text-sm text-danger">{error}</p>}
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{summary.map(([label, value]) => <div key={label} className="panel p-4 sm:p-5"><p className="text-xs font-medium text-muted">{label}</p><p className="mt-2 break-words text-2xl font-semibold tracking-tight text-ink">{value}</p></div>)}</div>
     {!analytics?.totalClicks ? <p className="rounded-xl bg-canvas-subtle p-4 text-sm text-muted">No clicks in this date range. Choose other dates or share a link to begin.</p> : <details className="overview-details"><summary className="button-secondary cursor-pointer">Explore overview analytics</summary><div className="mt-4 space-y-4">
     <DailyChart rows={analytics?.dailyClicks} title="Clicks over selected dates" />
     <div className="grid gap-3 md:grid-cols-2"><Breakdown title="Devices" data={analytics?.deviceBreakdown} /><Breakdown title="Top referrers" data={Object.fromEntries((analytics?.topReferrers ?? []).map((item) => [item.hostname, item.clicks]))} /></div>
     <CountryBreakdown countries={analytics?.countries} regions={analytics?.regions} cities={analytics?.cities} label="Overview geographic analytics" />
     <div className="grid gap-3 md:grid-cols-2"><div className="rounded-xl border border-[#e2ebdd] bg-white p-4"><h3 className="text-sm font-semibold text-[#295f22]">Top-performing links</h3>{analytics?.topLinks?.length ? <ol className="mt-3 space-y-2">{analytics.topLinks.slice(0, 5).map((link) => <li key={link.linkId} className="flex justify-between gap-3 text-sm"><span className="truncate">{link.title || link.shortCode}</span><strong>{link.clicks}</strong></li>)}</ol> : <p className="mt-3 text-sm text-[#718071]">No clicks recorded for this date range.</p>}</div>
-      <div className="rounded-xl border border-[#e2ebdd] bg-white p-4"><h3 className="text-sm font-semibold text-[#295f22]">Recently created links</h3>{analytics?.recentlyCreatedLinks?.length ? <ol className="mt-3 space-y-2">{analytics.recentlyCreatedLinks.slice(0, 5).map((link) => <li key={link.id} className="flex justify-between gap-3 text-sm"><span className="truncate">{link.title || link.shortCode}</span><time className="shrink-0 text-xs text-[#718071]">{link.createdAt ? new Date(link.createdAt).toLocaleDateString() : ''}</time></li>)}</ol> : <p className="mt-3 text-sm text-[#718071]">No links created yet.</p>}</div></div>
+</div>
     </div></details>}
+      <div className="rounded-xl border border-[#e2ebdd] bg-white p-4"><h2 className="text-sm font-semibold text-[#295f22]">Recently created links</h2>{analytics?.recentlyCreatedLinks?.length ? <ol className="mt-3 space-y-2">{analytics.recentlyCreatedLinks.slice(0, 5).map((link) => <li key={link.id} className="flex justify-between gap-3 text-sm"><span className="truncate">{link.title || link.shortCode}</span><time className="shrink-0 text-xs text-[#718071]">{link.createdAt ? new Date(link.createdAt).toLocaleDateString() : ''}</time></li>)}</ol> : <p className="mt-3 text-sm text-[#718071]">No links created yet.</p>}</div>
     <p className="rounded-xl bg-canvas-subtle p-3 text-xs leading-5 text-muted">Click counts are redirect requests, not unique visitors or conversions. Device, browser, OS and bot categories are estimates. Declared UTM values come from link setup; observed referrers are hostnames derived from the browser's referrer header and are separate signals.</p>
   </div>;
 }
 
 export function LinkAnalytics({ analytics, routing, loading, error }) {
-  if (loading) return <p className="mt-4 text-sm text-[#526052]" role="status">Loading link analytics…</p>;
-  if (error) return <p className="mt-4 text-sm text-[#922d21]" role="alert">{error}</p>;
+  if (loading && !analytics) return <p className="mt-4 text-sm text-[#526052]" role="status">Loading link analytics…</p>;
+  if (error && !analytics) return <p className="mt-4 text-sm text-[#922d21]" role="alert">{error}</p>;
   if (!analytics) return null;
   const metricCards = [
     ['Retained redirects (365 days)', analytics.totalClicks],
@@ -108,7 +126,7 @@ export function LinkAnalytics({ analytics, routing, loading, error }) {
     ].filter(Boolean).join(' AND ') || (rule ? 'Always-on rule' : 'Rule');
     return `${conditions} · ${history?.destinationUrl ?? rule?.destinationUrl ?? destination.destinationId}`;
   };
-  return <div className="mt-4 space-y-3 border-t border-[#e2ebdd] pt-4"><p className="text-xs text-muted">Retained redirects cover up to 365 days of stored events. Selected range follows the dashboard dates. The count on the link card is its lifetime total.</p>
+  return <div aria-busy={loading} className="mt-4 space-y-3 border-t border-[#e2ebdd] pt-4"><p role="status" className="min-h-5 text-xs text-muted">{loading ? "Updating analytics..." : ""}</p>{error && <p role="alert" className="text-sm text-danger">{error}</p>}<p className="text-xs text-muted">Retained redirects cover up to 365 days of stored events. Selected range follows the dashboard dates. The count on the link card is its lifetime total.</p>
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">{metricCards.map(([label, value]) => <div key={label} className="panel p-3"><p className="text-[11px] text-muted">{label}</p><p className="mt-1 text-xl font-semibold tracking-tight text-ink">{value}</p></div>)}</div>
     {analytics.clicksInRange === 0 ? <p className="rounded-xl bg-canvas-subtle p-4 text-sm text-muted">No clicks in the selected range. Choose other dates to explore this link.</p> : <>
     <DailyChart rows={analytics.dailyClicks} />

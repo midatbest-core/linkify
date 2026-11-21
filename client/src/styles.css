@@ -126,3 +126,8 @@ button:enabled { cursor: pointer; }
   .app-topbar > div > a > span:last-child { font-size: .875rem; }
   .app-topbar .nav-pill { padding-inline: 5px; font-size: .72rem; }
 }
+
+button, summary, input:not([type="checkbox"]), select { min-height: 44px; }
+.nav-pill, .button-secondary, .button-quiet, .button-danger { min-height: 44px; }
+.icon-button { width: 44px; min-width: 44px; height: 44px; }
+svg[role="group"]:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }

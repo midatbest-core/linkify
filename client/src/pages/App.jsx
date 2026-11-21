@@ -1,3 +1,4 @@
+import { authenticatedFetch, invalidateSession } from '../utils/authenticatedFetch.js';
 import { useEffect, useRef, useState } from 'react';
 import AdaptiveRuleEditor, { createAdaptiveRule } from '../components/AdaptiveRuleEditor.jsx';
 import AliasSuggestions from '../components/AliasSuggestions.jsx';
@@ -11,9 +12,12 @@ const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://l
 
 async function requestJson(path, options) {
   let response;
-  try { response = await fetch(`${API_URL}${path}`, { credentials: 'include', ...options }); }
+  try {
+    response = path === '/api/auth/login'
+      ? await fetch(`${API_URL}${path}`, { credentials: 'include', ...options })
+      : await authenticatedFetch(`${API_URL}${path}`, options);
+  }
   catch { throw new Error('Could not reach Linkify. Check your connection and try again.'); }
-  if (response.status === 401 && path !== '/api/auth/login') window.dispatchEvent(new Event('linkify:unauthorized'));
   let data;
   try { data = await response.json(); } catch { throw new Error('Linkify returned an unexpected response. Please try again.'); }
   return { response, data };
@@ -30,10 +34,10 @@ function BrandMark() {
   return <span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" className="size-5" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" strokeLinejoin="round" d="m9.2 14.8 5.6-5.6M7.2 16.8H6a3.8 3.8 0 0 1 0-7.6h4.1a3.8 3.8 0 0 1 3.2 1.8M16.8 7.2H18a3.8 3.8 0 1 1 0 7.6h-4.1a3.8 3.8 0 0 1-3.2-1.8" /></svg></span>;
 }
 
-function AppHeader({ view, setView, onLogout }) {
+function AppHeader({ view, setView, onLogout, logoutPending }) {
   return <header className="app-topbar"><div className="mx-auto flex min-h-[70px] max-w-7xl items-center justify-between gap-3 px-4 sm:px-7 lg:px-10">
     <a className="flex items-center gap-2.5 rounded-lg text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand" href="/" aria-label="Linkify home"><BrandMark /><span className="text-xl font-bold tracking-[-.055em]">linkify<span className="text-brand">.</span></span></a>
-    <nav aria-label="Main navigation" className="flex items-center gap-1 sm:gap-2"><button className="nav-pill" aria-current={view === 'create' ? 'page' : undefined} onClick={() => setView('create')}>Create link</button><button className="nav-pill" aria-current={view === 'dashboard' ? 'page' : undefined} onClick={() => setView('dashboard')}>Dashboard</button><button className="nav-pill hidden sm:inline-flex" onClick={onLogout}>Log out</button><button className="icon-button sm:hidden" aria-label="Log out" onClick={onLogout}>↗</button></nav>
+    <nav aria-label="Main navigation" className="flex items-center gap-1 sm:gap-2"><button className="nav-pill" aria-current={view === 'create' ? 'page' : undefined} onClick={() => setView('create')}>Create link</button><button className="nav-pill" aria-current={view === 'dashboard' ? 'page' : undefined} onClick={() => setView('dashboard')}>Dashboard</button><button className="nav-pill hidden sm:inline-flex" disabled={logoutPending} onClick={onLogout}>{logoutPending ? 'Logging out…' : 'Log out'}</button><button className="icon-button sm:hidden" disabled={logoutPending} aria-label={logoutPending ? 'Logging out' : 'Log out'} onClick={onLogout}>↗</button></nav>
   </div></header>;
 }
 
@@ -47,7 +51,7 @@ function CreateLinkPage({ onCreated }) {
   const [adaptiveRules, setAdaptiveRules] = useState([]);
   const [urlError, setUrlError] = useState('');
   const [link, setLink] = useState(null);
-  const [feedback, setFeedback] = useState(null);
+  const [feedback, setFeedbackState] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
@@ -55,6 +59,9 @@ function CreateLinkPage({ onCreated }) {
   const [showDetails, setShowDetails] = useState(false);
   const aliasRequestId = useRef(0);
   const utmPreview = buildUtmPreview(originalUrl, utm);
+  function setFeedback(value) {
+    setFeedbackState((current) => value ? { ...value, announcementId: (current?.announcementId ?? 0) + 1 } : null);
+  }
 
   async function checkAlias() {
     const alias = customAlias.trim();
@@ -100,7 +107,7 @@ function CreateLinkPage({ onCreated }) {
     catch { setFeedback({ tone: 'error', text: 'Select the short link and copy it manually.' }); }
   }
 
-  return <section className="mx-auto w-full max-w-7xl px-4 pb-14 pt-9 sm:px-7 sm:pt-12 lg:px-10">
+  return <section className="mx-auto w-full max-w-3xl px-4 pb-14 pt-9 sm:px-7 sm:pt-12 lg:px-10">
     <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">LINK STUDIO <span className="mx-1 text-brand">/</span> CREATE</p><h1 className="mt-3 max-w-3xl text-4xl font-semibold leading-[1.04] tracking-[-.055em] sm:text-5xl">Make your next link <span className="text-brand">work harder.</span></h1><p className="mt-3 max-w-xl text-sm leading-6 text-muted sm:text-base">Create a short link for one destination or route visitors with adaptive rules.</p></div></div>
     <div className="mx-auto max-w-3xl">
       <div className="min-w-0">
@@ -114,7 +121,7 @@ function CreateLinkPage({ onCreated }) {
           {showDetails && <div className="grid gap-3 rounded-xl bg-canvas-subtle p-3 sm:grid-cols-2"><label className="text-xs font-semibold">Link title<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="Spring launch" className="field-control" /></label><label className="text-xs font-semibold">Tags<input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="newsletter, spring" className="field-control" /></label><fieldset className="grid gap-3 sm:col-span-2 sm:grid-cols-3"><legend className="text-xs font-semibold">Campaign tracking (UTM)</legend>{UTM_KEYS.map((key) => <label key={key} className="text-xs font-medium text-muted">{key}<input value={utm[key] ?? ''} onChange={(event) => setUtm((current) => ({ ...current, [key]: event.target.value }))} maxLength={200} className="field-control" /></label>)}<p className="text-[11px] text-muted sm:col-span-3">Declared UTM labels help describe campaign attribution; they do not verify visits, leads or sales.</p></fieldset></div>}
           <button className="button-primary w-full sm:w-auto sm:min-w-48" type="submit" disabled={isLoading || isChecking} aria-busy={isLoading}>{isLoading ? <><span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white motion-reduce:animate-none" aria-hidden="true"/>Creating link…</> : <>Create link <span aria-hidden="true">→</span></>}</button>
         </form>
-        <div className="mt-4 space-y-3" aria-live="polite"><StatusMessage message={feedback?.text} tone={feedback?.tone} /><AliasSuggestions aliases={suggestions} onSelect={(alias) => { setCustomAlias(alias); setSuggestions([]); setFeedback({ tone: 'info', text: `“${alias}” selected. Create your link when ready.` }); }} /><ShortLinkResult link={link} copyState={copyState} onCopy={copyShortUrl} onAnalytics={() => onCreated?.({ ...link, showAnalytics: true })} /></div>
+        <div className="mt-4 space-y-3"><StatusMessage key={feedback?.announcementId} message={feedback?.text} tone={feedback?.tone} /><AliasSuggestions aliases={suggestions} onSelect={(alias) => { setCustomAlias(alias); setSuggestions([]); setFeedback({ tone: 'info', text: `“${alias}” selected. Create your link when ready.` }); }} /><ShortLinkResult link={link} copyState={copyState} onCopy={copyShortUrl} onAnalytics={() => onCreated?.({ ...link, showAnalytics: true })} /></div>
       </div>
 
     </div>
@@ -124,16 +131,33 @@ function CreateLinkPage({ onCreated }) {
 function AdminLogin({ onLogin }) {
   const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
   async function submit(event) { event.preventDefault(); setLoading(true); setError(''); try { const { response, data } = await requestJson('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) }); if (!response.ok) throw new Error(data.error ?? 'Login failed.'); onLogin(data.username); } catch (loginError) { setError(loginError.message); } finally { setLoading(false); } }
-  return <main className="grid min-h-screen place-items-center bg-canvas px-4 py-10"><form onSubmit={submit} className="panel w-full max-w-md space-y-5 p-6 sm:p-8"><div className="flex items-center gap-3"><BrandMark/><div><p className="text-lg font-bold tracking-tight">linkify<span className="text-brand">.</span></p><p className="text-xs text-muted">A clearer way to share</p></div></div><div><p className="eyebrow">WORKSPACE ACCESS</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Welcome back.</h1><p className="mt-2 text-sm text-muted">Sign in to manage your links and analytics.</p></div><label className="block text-sm font-semibold">Username<input required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} className="field-control" /></label><label className="block text-sm font-semibold">Password<input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="field-control" /></label>{error && <p role="alert" className="rounded-xl border border-[#efd5cf] bg-[#fff4f0] p-3 text-sm text-danger">{error}</p>}<button disabled={loading} className="button-primary w-full disabled:opacity-60">{loading ? 'Signing in…' : 'Sign in'}</button></form></main>;
+  return <main className="grid min-h-screen place-items-center bg-canvas px-4 py-10"><form onSubmit={submit} className="panel w-full max-w-md space-y-5 p-6 sm:p-8"><div className="flex items-center gap-3"><BrandMark/><div><p className="text-lg font-bold tracking-tight">linkify<span className="text-brand">.</span></p><p className="text-xs text-muted">A clearer way to share</p></div></div><div><p className="eyebrow">WORKSPACE ACCESS</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Welcome back.</h1><p className="mt-2 text-sm text-muted">Sign in to manage your links and analytics.</p></div><label className="block text-sm font-semibold">Username<input autoFocus required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} className="field-control" /></label><label className="block text-sm font-semibold">Password<input required type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="field-control" /></label>{error && <p role="alert" className="rounded-xl border border-[#efd5cf] bg-[#fff4f0] p-3 text-sm text-danger">{error}</p>}<button disabled={loading} className="button-primary w-full disabled:opacity-60">{loading ? 'Signing in…' : 'Sign in'}</button></form></main>;
 }
 
 function App() {
   const [authState, setAuthState] = useState('loading'); const [view, setView] = useState('create'); const [createdLink, setCreatedLink] = useState(null);
   useEffect(() => { fetch(`${API_URL}/api/auth/session`, { credentials: 'include' }).then((response) => response.json()).then((data) => setAuthState(data.authenticated ? 'authenticated' : 'anonymous')).catch(() => setAuthState('anonymous')); const onUnauthorized = () => setAuthState('anonymous'); window.addEventListener('linkify:unauthorized', onUnauthorized); return () => window.removeEventListener('linkify:unauthorized', onUnauthorized); }, []);
-  async function logout() { await fetch(`${API_URL}/api/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {}); setAuthState('anonymous'); }
+  const [logoutError, setLogoutError] = useState('');
+  const [logoutPending, setLogoutPending] = useState(false);
+  const logoutPendingRef = useRef(false);
+  async function logout() {
+    if (logoutPendingRef.current) return;
+    logoutPendingRef.current = true;
+    setLogoutPending(true);
+    setLogoutError('');
+    try {
+      await invalidateSession(`${API_URL}/api/auth/logout`);
+      setAuthState('anonymous');
+    } catch {
+      setLogoutError('Sign out failed. Your session may still be active. Please try again.');
+    } finally {
+      logoutPendingRef.current = false;
+      setLogoutPending(false);
+    }
+  }
   if (authState === 'loading') return <main className="grid min-h-screen place-items-center bg-canvas px-4 text-sm text-muted"><div className="w-full max-w-sm space-y-4" role="status" aria-label="Checking session"><div className="skeleton h-8 w-40 rounded-lg"/><div className="skeleton h-4 w-full rounded"/><div className="skeleton h-32 w-full rounded-2xl"/><span className="sr-only">Checking session…</span></div></main>;
   if (authState !== 'authenticated') return <AdminLogin onLogin={() => setAuthState('authenticated')} />;
-  return <div className="app-shell"><AppHeader view={view} setView={setView} onLogout={logout}/><main id="main-content">{view === 'dashboard' ? <LinkDashboard onCreateLink={() => setView('create')} initialExpanded={createdLink?.showAnalytics ? createdLink.id : null} /> : <CreateLinkPage onCreated={(link) => { setCreatedLink(link); if (link.showAnalytics) setView('dashboard'); }} />}</main><footer className="safe-bottom border-t border-line bg-surface px-4 py-5 text-center text-xs text-muted">Linkify <span className="mx-1">·</span> A clearer way to share links.</footer></div>;
+  return <div className="app-shell"><AppHeader view={view} setView={setView} onLogout={logout} logoutPending={logoutPending}/><main id="main-content">{logoutError && <p role="alert" className="mx-auto max-w-3xl px-4 pt-4 text-sm text-danger">{logoutError}</p>}{view === 'dashboard' ? <LinkDashboard onCreateLink={() => setView('create')} initialExpanded={createdLink?.showAnalytics ? createdLink.id : null} /> : <CreateLinkPage onCreated={(link) => { setCreatedLink(link); if (link.showAnalytics) setView('dashboard'); }} />}</main><footer className="safe-bottom border-t border-line bg-surface px-4 py-5 text-center text-xs text-muted">Linkify <span className="mx-1">·</span> A clearer way to share links.</footer></div>;
 }
 
 export default App;

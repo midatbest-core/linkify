@@ -247,7 +247,9 @@ test('authenticated routing simulation reuses rule priority without writing clic
   assert.equal(response.status, 200);
   const result = (await response.json()).simulation;
   assert.equal(result.matchedRule.ruleId, 'mobile-first');
+  assert.equal(result.matchedRule.priority, 0);
   assert.equal(result.matchedRule.conditions.deviceType, 'mobile');
+  assert.match(result.matchedRule.conditionSummary, /mobile device/);
   assert.equal(result.destinationUrl, 'https://example.com/mobile');
   assert.equal(result.note.includes('does not record a click'), true);
   assert.equal(models.events.length, before);

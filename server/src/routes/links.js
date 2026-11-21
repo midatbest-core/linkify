@@ -36,6 +36,23 @@ function serializeLink(link, baseUrl) {
   };
 }
 
+function describeMatchedRule(rule) {
+  const value = rule?.toObject?.() ?? rule;
+  const conditions = [];
+  if (value.deviceType) conditions.push(`${value.deviceType} device`);
+  if (value.countryCode) conditions.push(`country ${value.countryCode}`);
+  if (value.startAt || value.endAt) {
+    const start = value.startAt ? new Date(value.startAt).toISOString() : 'any time';
+    const end = value.endAt ? new Date(value.endAt).toISOString() : 'any time';
+    conditions.push(`active ${start} to ${end} (${value.timeZone ?? 'UTC'})`);
+  }
+  const campaign = value.campaign?.toObject?.() ?? value.campaign ?? {};
+  for (const [field, campaignValue] of Object.entries(campaign)) {
+    if (campaignValue) conditions.push(`utm_${field} = “${campaignValue}”`);
+  }
+  return conditions.join(' AND ');
+}
+
 export function createLinksRouter({ linkModel = Link, clickEventModel = ClickEvent, linkService = createLinkService(linkModel) } = {}) {
   const router = Router();
 
@@ -115,10 +132,13 @@ export function createLinksRouter({ linkModel = Link, clickEventModel = ClickEve
       const link = await linkModel.findById(request.params.id);
       if (!link) return response.status(404).json({ error: 'Link not found.' });
       const result = resolveAdaptiveDestination(link, { deviceType, countryCode, query, now });
-      const rule = result.matchedRuleId && link.adaptiveRouting?.rules?.find((entry) => entry.ruleId === result.matchedRuleId);
+      const rules = link.adaptiveRouting?.rules ?? [];
+      const ruleIndex = result.matchedRuleId ? rules.findIndex((entry) => entry.ruleId === result.matchedRuleId) : -1;
+      const rule = ruleIndex >= 0 ? rules[ruleIndex] : null;
       response.json({ simulation: {
         ...result,
-        matchedRule: rule ? { ruleId: rule.ruleId, priority: rule.priority, destinationUrl: rule.destinationUrl,
+        matchedRule: rule ? { ruleId: rule.ruleId, priority: Number.isInteger(rule.priority) ? rule.priority : ruleIndex, destinationUrl: rule.destinationUrl,
+          conditionSummary: describeMatchedRule(rule),
           conditions: {
             deviceType: rule.deviceType, countryCode: rule.countryCode,
             startAt: rule.startAt, endAt: rule.endAt, timeZone: rule.timeZone,

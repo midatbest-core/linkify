@@ -1,6 +1,7 @@
 import { authenticatedFetch } from '../utils/authenticatedFetch.js';
-import { useState } from 'react';
-import { getAdaptiveRuleSummary } from '../utils/adaptiveRoutingValidation.js';
+import { useEffect, useRef, useState } from 'react';
+import { beginLatestRequest, cancelLatestRequest, finishLatestRequest, isLatestRequest } from '../utils/latestRequest.js';
+import { getServerConditionSummary } from '../utils/routingSimulation.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
 const nowLocal = () => { const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000); return d.toISOString().slice(0, 16); };
@@ -13,16 +14,22 @@ export default function RoutingSimulator({ link, onClose }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const requestController = useRef(null);
+  useEffect(() => () => cancelLatestRequest(requestController), []);
   async function simulate(event) {
-    event.preventDefault(); setLoading(true); setError('');
+    event.preventDefault();
+    const controller = beginLatestRequest(requestController);
+    setLoading(true); setError('');
     try {
-      const response = await authenticatedFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}/simulate`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceType, countryCode, now: new Date(time).toISOString(), query: Object.fromEntries(Object.entries(query).filter(([, value]) => value)) }) });
+      const response = await authenticatedFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}/simulate`, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceType, countryCode, now: new Date(time).toISOString(), query: Object.fromEntries(Object.entries(query).filter(([, value]) => value)) }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Could not simulate this route.');
-      const matchedRule = data.simulation.matchedRule?.conditions;
-      setResult({ ...data.simulation, conditionSummary: matchedRule ? getAdaptiveRuleSummary(matchedRule).split('; priority')[0] : null });
-    } catch (cause) { setResult(null); setError(cause.message || 'Could not reach Linkify.'); }
-    finally { setLoading(false); }
+      if (isLatestRequest(requestController, controller)) setResult(data.simulation);
+    } catch (cause) {
+      if (isLatestRequest(requestController, controller) && cause.name !== 'AbortError') { setResult(null); setError(cause.message || 'Could not reach Linkify.'); }
+    } finally {
+      if (finishLatestRequest(requestController, controller)) setLoading(false);
+    }
   }
   return <section className="mt-4 rounded-2xl border border-[#cbdcc2] bg-[#f7faf4] p-4 sm:p-5" aria-labelledby="simulator-title">
     <div className="flex items-start justify-between gap-3"><div><p className="eyebrow !text-brand">READ-ONLY PREVIEW</p><h3 id="simulator-title" className="mt-1 text-lg font-semibold">Routing simulator</h3><p className="mt-1 text-xs leading-5 text-muted">Test configured conditions. This is not a real visitor lookup and records no click.</p></div><button className="icon-button" type="button" aria-label="Close routing simulator" onClick={onClose}>×</button></div>
@@ -34,6 +41,6 @@ export default function RoutingSimulator({ link, onClose }) {
       <div className="flex items-end"><button disabled={loading} type="submit" className="button-primary min-h-11 w-full">{loading ? 'Simulating…' : 'Simulate route'}</button></div>
     </form>
     {error && <p role="alert" className="mt-3 rounded-xl bg-[#fff4f0] p-3 text-sm text-danger">{error}</p>}
-    {result && <div aria-busy={loading} data-outcome={result.usedFallback ? "fallback" : "match"} className="simulation-result mt-4 rounded-xl border p-4" aria-live="polite"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="eyebrow">RESULT</p><p className="mt-1 text-sm font-semibold">{result.matchedRule ? `Matched rule ${result.matchedRule.priority + 1}` : 'Default destination'}</p></div><span className={`status-pill ${result.usedFallback ? 'status-off' : 'status-on'}`}>{result.usedFallback ? 'Fallback' : 'Rule matched'}</span></div>{result.conditionSummary && <p className="mt-2 text-sm text-muted">Matched conditions: {result.conditionSummary}</p>}<p className="mt-3 break-all text-sm font-medium text-ink">{result.destinationUrl}</p>{result.fallbackReason && <p className="mt-2 text-xs text-muted">{result.fallbackReason}</p>}<p className="mt-3 border-t border-line pt-3 text-[11px] text-muted">{result.note}</p></div>}
+    {result && <div aria-busy={loading} data-outcome={result.usedFallback ? "fallback" : "match"} className="simulation-result mt-4 rounded-xl border p-4" aria-live="polite" aria-atomic="true"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="eyebrow">RESULT</p><p className="mt-1 text-sm font-semibold">{result.matchedRule ? `Matched rule ${result.matchedRule.priority + 1}` : 'Default destination'}</p></div><span className={`status-pill ${result.usedFallback ? 'status-off' : 'status-on'}`}>{result.usedFallback ? 'Fallback' : 'Rule matched'}</span></div>{getServerConditionSummary(result) && <p className="mt-2 text-sm text-muted">Matched conditions: {getServerConditionSummary(result)}</p>}<p className="mt-3 break-all text-sm font-medium text-ink">{result.destinationUrl}</p>{result.fallbackReason && <p className="mt-2 text-xs text-muted">{result.fallbackReason}</p>}<p className="mt-3 border-t border-line pt-3 text-[11px] text-muted">{result.note}</p></div>}
   </section>;
 }

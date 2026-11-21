@@ -5,6 +5,7 @@ import AdaptiveRuleEditor, { createAdaptiveRule, prepareAdaptiveRule } from './A
 import RoutingSimulator from './RoutingSimulator.jsx';
 import { firstInvalidAdaptiveRule, serializeAdaptiveRule } from '../utils/adaptiveRoutingValidation.js';
 import { authenticatedFetch } from '../utils/authenticatedFetch.js';
+import { scheduleDashboardFilters } from '../utils/dashboardFilters.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
 const utcToday = () => new Date().toISOString().slice(0, 10);
@@ -19,13 +20,12 @@ export default function LinkDashboard({ onCreateLink, initialExpanded = null }) 
   const [notice, setNotice] = useState('');
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
+  const [tag, setTag] = useState('');
+  const [filterTag, setFilterTag] = useState('');
   const announcementTimer = useRef(null);
   const searchInput = useRef(null);
   const simulatorButtons = useRef(new Map());
-  useEffect(() => {
-    const timer = setTimeout(() => setSearch(query), 250);
-    return () => clearTimeout(timer);
-  }, [query]);
+  useEffect(() => scheduleDashboardFilters({ query, tag, apply: ({ search: nextSearch, filterTag: nextTag }) => { setSearch(nextSearch); setFilterTag(nextTag); } }), [query, tag]);
   useEffect(() => () => clearTimeout(announcementTimer.current), []);
   function announce(message) {
     clearTimeout(announcementTimer.current);
@@ -33,7 +33,6 @@ export default function LinkDashboard({ onCreateLink, initialExpanded = null }) 
     announcementTimer.current = setTimeout(() => setNotice(message), 60);
   }
   const [status, setStatus] = useState('all');
-  const [tag, setTag] = useState('');
   const [sort, setSort] = useState('createdAt');
   const [order, setOrder] = useState('desc');
   const [expanded, setExpanded] = useState(null);
@@ -58,7 +57,7 @@ export default function LinkDashboard({ onCreateLink, initialExpanded = null }) 
     async function loadLinks() {
       setLoading(true); setError('');
       const params = new URLSearchParams({ q: search, status, sort, order, page: String(page), limit: '50' });
-      if (tag.trim()) params.set('tag', tag.trim());
+      if (filterTag.trim()) params.set('tag', filterTag.trim());
       try {
         const response = await authenticatedFetch(`${API_URL}/api/links?${params}`, { signal: controller.signal });
         const data = await response.json();
@@ -69,7 +68,7 @@ export default function LinkDashboard({ onCreateLink, initialExpanded = null }) 
     }
     loadLinks();
     return () => { cancelled = true; controller.abort(); };
-  }, [search, status, tag, sort, order, page]);
+  }, [search, status, filterTag, sort, order, page]);
 
   useEffect(() => {
     let cancelled = false;

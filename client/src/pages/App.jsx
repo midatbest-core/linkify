@@ -7,6 +7,7 @@ import ShortLinkResult from '../components/ShortLinkResult.jsx';
 import StatusMessage from '../components/StatusMessage.jsx';
 import { UTM_KEYS, buildUtmPreview } from '../utils/utm.js';
 import { firstInvalidAdaptiveRule, serializeAdaptiveRule } from '../utils/adaptiveRoutingValidation.js';
+import { beginLatestRequest, cancelLatestRequest, finishLatestRequest, isLatestRequest } from '../utils/latestRequest.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
 
@@ -17,7 +18,10 @@ async function requestJson(path, options) {
       ? await fetch(`${API_URL}${path}`, { credentials: 'include', ...options })
       : await authenticatedFetch(`${API_URL}${path}`, options);
   }
-  catch { throw new Error('Could not reach Linkify. Check your connection and try again.'); }
+  catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new Error('Could not reach Linkify. Check your connection and try again.');
+  }
   let data;
   try { data = await response.json(); } catch { throw new Error('Linkify returned an unexpected response. Please try again.'); }
   return { response, data };
@@ -58,6 +62,8 @@ function CreateLinkPage({ onCreated }) {
   const [copyState, setCopyState] = useState('idle');
   const [showDetails, setShowDetails] = useState(false);
   const aliasRequestId = useRef(0);
+  const aliasRequestController = useRef(null);
+  useEffect(() => () => cancelLatestRequest(aliasRequestController), []);
   const utmPreview = buildUtmPreview(originalUrl, utm);
   function setFeedback(value) {
     setFeedbackState((current) => value ? { ...value, announcementId: (current?.announcementId ?? 0) + 1 } : null);
@@ -66,16 +72,17 @@ function CreateLinkPage({ onCreated }) {
   async function checkAlias() {
     const alias = customAlias.trim();
     if (!alias) { setFeedback({ tone: 'error', text: 'Enter an alias to check its availability.' }); return; }
+    const controller = beginLatestRequest(aliasRequestController);
     const requestId = ++aliasRequestId.current;
     setIsChecking(true); setFeedback(null); setSuggestions([]); setLink(null);
     try {
-      const { response, data } = await requestJson(`/api/aliases/${encodeURIComponent(alias)}/availability`);
-      if (requestId !== aliasRequestId.current) return;
+      const { response, data } = await requestJson(`/api/aliases/${encodeURIComponent(alias)}/availability`, { signal: controller.signal });
+      if (requestId !== aliasRequestId.current || !isLatestRequest(aliasRequestController, controller)) return;
       if (!response.ok) throw new Error(data.error ?? 'Could not check this alias.');
       if (data.available) setFeedback({ tone: 'success', text: `“${data.alias}” is available.` });
       else { setFeedback({ tone: 'info', text: `“${data.alias}” is taken. Try one of these:` }); setSuggestions(data.suggestions ?? []); }
-    } catch (error) { if (requestId === aliasRequestId.current) setFeedback({ tone: 'error', text: error.message }); }
-    finally { if (requestId === aliasRequestId.current) setIsChecking(false); }
+    } catch (error) { if (requestId === aliasRequestId.current && error.name !== 'AbortError') setFeedback({ tone: 'error', text: error.message }); }
+    finally { if (requestId === aliasRequestId.current && finishLatestRequest(aliasRequestController, controller)) setIsChecking(false); }
   }
 
   async function shortenLink(event) {
@@ -87,7 +94,7 @@ function CreateLinkPage({ onCreated }) {
       const invalidRule = firstInvalidAdaptiveRule(adaptiveRules);
       if (invalidRule) { setFeedback({ tone: 'error', text: `Rule ${invalidRule.index + 1}: ${invalidRule.message}` }); return; }
     }
-    aliasRequestId.current += 1; setIsChecking(false); setIsLoading(true); setFeedback(null); setSuggestions([]); setLink(null); setCopyState('idle');
+    aliasRequestId.current += 1; cancelLatestRequest(aliasRequestController); setIsChecking(false); setIsLoading(true); setFeedback(null); setSuggestions([]); setLink(null); setCopyState('idle');
     const payload = { originalUrl: originalUrl.trim() };
     if (routingMode === 'adaptive') payload.adaptiveRouting = { enabled: true, defaultDestinationUrl: originalUrl.trim(), rules: adaptiveRules.map(serializeAdaptiveRule) };
     if (customAlias.trim()) payload.customAlias = customAlias.trim();
@@ -116,7 +123,7 @@ function CreateLinkPage({ onCreated }) {
           <div><label className="mb-2 block text-sm font-semibold" htmlFor="destination-url">Destination URL</label><div className={`flex min-h-[54px] items-center rounded-xl border bg-white px-3 transition focus-within:ring-4 focus-within:ring-brand/10 ${urlError ? 'border-danger' : 'border-line focus-within:border-brand'}`}><svg viewBox="0 0 24 24" fill="none" className="mr-2.5 size-[18px] shrink-0 text-muted" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M3.5 9h17M3.5 15h17M12 3c2.2 2.4 3.2 5.4 3.2 9s-1 6.6-3.2 9c-2.2-2.4-3.2-5.4-3.2-9s1-6.6 3.2-9Z"/></svg><input id="destination-url" className="h-[52px] min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-[#9aa39a]" type="url" inputMode="url" autoComplete="url" aria-required="true" aria-invalid={Boolean(urlError)} aria-describedby={urlError ? 'url-error' : 'url-hint'} disabled={isLoading || isChecking} value={originalUrl} onChange={(event) => { setOriginalUrl(event.target.value); setUrlError(''); setLink(null); setFeedback(null); }} placeholder="https://example.com/your-long-link" />{originalUrl && <button type="button" onClick={() => { setOriginalUrl(''); setUrlError(''); }} className="icon-button ml-2" aria-label="Clear destination URL">×</button>}</div>{urlError ? <p id="url-error" className="mt-2 text-sm text-danger" role="alert">{urlError}</p> : <p id="url-hint" className="mt-2 text-xs text-muted">Paste a complete URL starting with http:// or https://</p>}{originalUrl.trim() && <p className="mt-3 break-all rounded-xl bg-canvas-subtle px-3 py-2.5 text-xs leading-5 text-muted">Final destination: <span className="font-medium text-ink">{utmPreview.url || 'Enter a valid web address.'}</span></p>}{utmPreview.conflicts.length > 0 && <p className="mt-2 text-xs text-danger">Existing UTM values are kept: {utmPreview.conflicts.join(', ')}.</p>}</div>
           <fieldset><legend className="mb-2 text-sm font-semibold">Choose how it routes</legend><div className="grid grid-cols-2 gap-2 rounded-xl bg-canvas-subtle p-1.5"><button type="button" onClick={() => setRoutingMode('standard')} aria-pressed={routingMode === 'standard'} className={`min-h-11 rounded-lg px-3 text-sm font-semibold transition ${routingMode === 'standard' ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'}`}>Standard</button><button type="button" onClick={() => setRoutingMode('adaptive')} aria-pressed={routingMode === 'adaptive'} className={`min-h-11 rounded-lg px-3 text-sm font-semibold transition ${routingMode === 'adaptive' ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'}`}>Adaptive </button></div><p className="mt-2 text-xs text-muted">{routingMode === 'standard' ? 'One memorable link, one destination.' : 'Send different audiences to the destination that fits.'}</p></fieldset>
           {routingMode === 'adaptive' && <div className="rounded-2xl border border-line bg-[#fbfcf8] p-3 sm:p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold">Smart routing rules</p><p className="mt-1 max-w-lg text-xs leading-5 text-muted">Rules run top to bottom. Every condition in a rule must match; otherwise visitors go to the default URL.</p></div><button type="button" onClick={() => setAdaptiveRules((rules) => [...rules, createAdaptiveRule()])} disabled={adaptiveRules.length >= 20} className="button-secondary min-h-10 px-3 text-xs">+ Add rule</button></div><div className="mt-3 space-y-2">{adaptiveRules.length ? adaptiveRules.map((rule, index) => <AdaptiveRuleEditor key={rule.ruleId} rule={rule} index={index} count={adaptiveRules.length} onChange={(value) => setAdaptiveRules((rows) => rows.map((row) => row.ruleId === rule.ruleId ? value : row))} onMove={(direction) => setAdaptiveRules((rows) => { const next = [...rows]; [next[index], next[index + direction]] = [next[index + direction], next[index]]; return next; })} onRemove={() => setAdaptiveRules((rows) => rows.filter((row) => row.ruleId !== rule.ruleId))} />) : <div className="rounded-xl border border-dashed border-line bg-surface p-4 text-center"><p className="text-sm font-medium">Start with a rule</p><p className="mt-1 text-xs text-muted">For example, send mobile visitors to a mobile-friendly page.</p><button type="button" onClick={() => setAdaptiveRules([createAdaptiveRule()])} className="button-quiet mt-2 text-xs text-brand">Create your first rule</button></div>}</div></div>}
-          <div className="alias-layout"><label className="alias-label text-xs font-semibold" htmlFor="custom-alias">Custom alias <span className="font-normal text-muted">(optional)</span></label><div className="alias-control"><span className="text-sm text-muted">linkify /</span><input id="custom-alias" className="min-w-0 flex-1 bg-transparent pl-1 text-sm font-normal outline-none" value={customAlias} maxLength={40} autoComplete="off" aria-describedby="alias-hint" disabled={isLoading || isChecking} onChange={(event) => { setCustomAlias(event.target.value); setLink(null); setFeedback(null); }} placeholder="your-alias" /></div><p id="alias-hint" className="alias-hint text-xs font-normal text-muted">3–40 letters, numbers or hyphens.</p><button type="button" className="alias-check button-secondary w-full" disabled={isChecking || isLoading} onClick={checkAlias}>{isChecking ? 'Checking…' : 'Check availability'}</button></div>
+          <div className="alias-layout"><label className="alias-label text-xs font-semibold" htmlFor="custom-alias">Custom alias <span className="font-normal text-muted">(optional)</span></label><div className="alias-control"><span className="text-sm text-muted">linkify /</span><input id="custom-alias" className="min-w-0 flex-1 bg-transparent pl-1 text-sm font-normal outline-none" value={customAlias} maxLength={40} autoComplete="off" aria-describedby="alias-hint" disabled={isLoading || isChecking} onChange={(event) => { aliasRequestId.current += 1; cancelLatestRequest(aliasRequestController); setIsChecking(false); setCustomAlias(event.target.value); setSuggestions([]); setLink(null); setFeedback(null); }} placeholder="your-alias" /></div><p id="alias-hint" className="alias-hint text-xs font-normal text-muted">3–40 letters, numbers or hyphens.</p><button type="button" className="alias-check button-secondary w-full" disabled={isChecking || isLoading} onClick={checkAlias}>{isChecking ? 'Checking…' : 'Check availability'}</button></div>
           <div className="advanced-section"><button type="button" className="advanced-toggle" aria-expanded={showDetails} onClick={() => setShowDetails((value) => !value)}><span className="advanced-toggle__label">Advanced details <span className="font-normal text-muted">· title, tags and campaign labels</span></span><span className="advanced-toggle__icon" aria-hidden="true">{showDetails ? '−' : '+'}</span></button>
           {showDetails && <div className="grid gap-3 rounded-xl bg-canvas-subtle p-3 sm:grid-cols-2"><label className="text-xs font-semibold">Link title<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="Spring launch" className="field-control" /></label><label className="text-xs font-semibold">Tags<input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="newsletter, spring" className="field-control" /></label><fieldset className="grid gap-3 sm:col-span-2 sm:grid-cols-3"><legend className="text-xs font-semibold">Campaign tracking (UTM)</legend>{UTM_KEYS.map((key) => <label key={key} className="text-xs font-medium text-muted">{key}<input value={utm[key] ?? ''} onChange={(event) => setUtm((current) => ({ ...current, [key]: event.target.value }))} maxLength={200} className="field-control" /></label>)}<p className="text-[11px] text-muted sm:col-span-3">Declared UTM labels help describe campaign attribution; they do not verify visits, leads or sales.</p></fieldset></div>}</div>
           <button className="button-primary w-full sm:w-auto sm:min-w-48 sm:justify-self-start" type="submit" disabled={isLoading || isChecking} aria-busy={isLoading}>{isLoading ? <><span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white motion-reduce:animate-none" aria-hidden="true"/>Creating link…</> : <>Create link <span aria-hidden="true">→</span></>}</button>

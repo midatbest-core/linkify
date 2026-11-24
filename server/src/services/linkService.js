@@ -90,6 +90,7 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
     }
     const current = await Link.findById(id);
     if (!current) return null;
+    if (current.management?.ownerType === 'flow') throw Object.assign(new Error('This link is managed by an Event Flow. Open the Flow to change routing or status.'), { status: 409, code: 'FLOW_MANAGED_LINK' });
     const updates = {};
     if (Object.hasOwn(input, 'originalUrl')) {
       const destination = normalizeAndValidateUrl(input.originalUrl);

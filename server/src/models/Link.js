@@ -37,6 +37,10 @@ const linkSchema = new mongoose.Schema({
   title: { type: String, trim: true, maxlength: 120, default: '' },
   tags: { type: [String], default: [] },
   status: { type: String, enum: ['active', 'archived'], default: 'active', index: true },
+  management: {
+    ownerType: { type: String, enum: ['flow'], default: undefined },
+    flowId: { type: String, default: undefined },
+  },
 }, {
   collection: 'links',
   timestamps: true,
@@ -45,5 +49,6 @@ const linkSchema = new mongoose.Schema({
 linkSchema.index({ createdAt: -1 });
 linkSchema.index({ status: 1, createdAt: -1 });
 linkSchema.index({ tags: 1, createdAt: -1 });
+linkSchema.index({ 'management.flowId': 1 }, { unique: true, partialFilterExpression: { 'management.ownerType': 'flow' } });
 
 export default mongoose.models.Link ?? mongoose.model('Link', linkSchema);

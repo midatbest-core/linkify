@@ -103,6 +103,7 @@ function validateNormalized(flow) {
   for (const stage of stages) {
     if (!stage.destinationUrl) errors.push(issue('destination_required', `${stage.phase} needs a destination URL.`, stage.nodeId, 'destinationUrl'));
     if (stage.startAtUtc && stage.endAtUtc && stage.endAtUtc <= stage.startAtUtc) errors.push(issue('stage_window_order', `${stage.phase} end must be after its start.`, stage.nodeId, 'schedule'));
+    if (stage.phase === 'custom' && !stage.startAtUtc && !stage.endAtUtc) errors.push(issue('custom_window_required', 'Custom stages need a start, an end, or both.', stage.nodeId, 'schedule'));
     if (!edges.some((edge) => edge.target === stage.nodeId)) errors.push(issue('stage_disconnected', `${stage.phase} is not connected to the router.`, stage.nodeId));
   }
   if (!flow.draft.routing.fallbackNodeId || !flow.draft.routing.fallbackDestinationUrl) errors.push(issue('fallback_required', 'A connected fallback with a valid destination is required.'));
@@ -147,7 +148,7 @@ export function serializeFlow(flow) {
     return { id: node.nodeId, type: 'flowNode', position: node.position, data: { kind: node.kind, label: node.label, description: node.description, ...(node.phase ? { phase: node.phase } : {}), ...((stage || isFallback) ? { destinationUrl: stage?.destinationUrl ?? plain.draft.routing.fallbackDestinationUrl ?? '' } : {}), ...(stage ? { schedule: { startLocal: stage.startLocal ?? '', endLocal: stage.endLocal ?? '', startDisambiguation: stage.startDisambiguation ?? 'earlier', endDisambiguation: stage.endDisambiguation ?? 'earlier', startAtUtc: stage.startAtUtc ?? null, endAtUtc: stage.endAtUtc ?? null } } : {}) } };
   });
   const edges = (plain.draft?.presentation?.edges ?? []).map((edge) => ({ id: edge.edgeId, source: edge.source, target: edge.target, label: edge.label, type: 'smoothstep', data: { conditionLabel: edge.label } }));
-  const base = { id: plain.flowId, flowId: plain.flowId, eventName: plain.eventName, description: plain.description ?? '', creatorTimeZone: plain.creatorTimeZone, eventStartLocal: plain.eventStartLocal ?? '', eventEndLocal: plain.eventEndLocal ?? '', eventStartDisambiguation: plain.eventStartDisambiguation ?? 'earlier', eventEndDisambiguation: plain.eventEndDisambiguation ?? 'earlier', eventStartAtUtc: plain.eventStartAtUtc ?? null, eventEndAtUtc: plain.eventEndAtUtc ?? null, revision: plain.revision, publishedRevision: plain.publishedRevision ?? null, linkId: plain.linkId ?? null, graph: { nodes, edges }, createdAt: plain.createdAt, updatedAt: plain.updatedAt };
+  const base = { id: plain.flowId, flowId: plain.flowId, eventName: plain.eventName, description: plain.description ?? '', creatorTimeZone: plain.creatorTimeZone, eventStartLocal: plain.eventStartLocal ?? '', eventEndLocal: plain.eventEndLocal ?? '', eventStartDisambiguation: plain.eventStartDisambiguation ?? 'earlier', eventEndDisambiguation: plain.eventEndDisambiguation ?? 'earlier', eventStartAtUtc: plain.eventStartAtUtc ?? null, eventEndAtUtc: plain.eventEndAtUtc ?? null, revision: plain.revision, publishedRevision: plain.publishedRevision ?? null, publishedAt: plain.publishedAt ?? null, linkId: plain.linkId ?? null, graph: { nodes, edges }, createdAt: plain.createdAt, updatedAt: plain.updatedAt };
   return base;
 }
 

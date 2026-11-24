@@ -54,7 +54,7 @@ export function createApp({ linkModel = Link, flowModel = Flow, clickEventModel 
     : next());
   app.use('/api', auth.requireAdmin);
   app.use('/api', createAnalyticsRouter({ linkModel, clickEventModel, rateLimitMiddleware: analyticsLimit }));
-  app.use('/api/flows', createFlowsRouter({ flowModel }));
+  app.use('/api/flows', createFlowsRouter({ flowModel, linkModel }));
   app.use('/api/links', (request, response, next) => request.method === 'POST'
     ? createLinkLimit(request, response, next)
     : next(), createLinksRouter({ linkModel, clickEventModel }));

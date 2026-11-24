@@ -1,16 +1,16 @@
 import { authenticatedFetch, invalidateSession } from '../utils/authenticatedFetch.js';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import AdaptiveRuleEditor, { createAdaptiveRule } from '../components/AdaptiveRuleEditor.jsx';
 import AliasSuggestions from '../components/AliasSuggestions.jsx';
 import LinkDashboard from '../components/LinkDashboard.jsx';
 import ShortLinkResult from '../components/ShortLinkResult.jsx';
 import StatusMessage from '../components/StatusMessage.jsx';
-import FlowWorkspace from '../components/FlowWorkspace.jsx';
 import { UTM_KEYS, buildUtmPreview } from '../utils/utm.js';
 import { firstInvalidAdaptiveRule, serializeAdaptiveRule } from '../utils/adaptiveRoutingValidation.js';
 import { beginLatestRequest, cancelLatestRequest, finishLatestRequest, isLatestRequest } from '../utils/latestRequest.js';
 
 const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
+const FlowWorkspace = lazy(() => import('../components/FlowWorkspace.jsx'));
 
 async function requestJson(path, options) {
   let response;
@@ -143,7 +143,7 @@ function AdminLogin({ onLogin }) {
 }
 
 function App() {
-  const [authState, setAuthState] = useState('loading'); const [view, setView] = useState('create'); const [createdLink, setCreatedLink] = useState(null);
+  const [authState, setAuthState] = useState('loading'); const [view, setView] = useState('create'); const [createdLink, setCreatedLink] = useState(null); const [flowToOpen, setFlowToOpen] = useState(null);
   useEffect(() => { fetch(`${API_URL}/api/auth/session`, { credentials: 'include' }).then((response) => response.json()).then((data) => setAuthState(data.authenticated ? 'authenticated' : 'anonymous')).catch(() => setAuthState('anonymous')); const onUnauthorized = () => setAuthState('anonymous'); window.addEventListener('linkify:unauthorized', onUnauthorized); return () => window.removeEventListener('linkify:unauthorized', onUnauthorized); }, []);
   const [logoutError, setLogoutError] = useState('');
   const [logoutPending, setLogoutPending] = useState(false);
@@ -165,7 +165,7 @@ function App() {
   }
   if (authState === 'loading') return <main className="grid min-h-screen place-items-center bg-canvas px-4 text-sm text-muted"><div className="w-full max-w-sm space-y-4" role="status" aria-label="Checking session"><div className="skeleton h-8 w-40 rounded-lg"/><div className="skeleton h-4 w-full rounded"/><div className="skeleton h-32 w-full rounded-2xl"/><span className="sr-only">Checking session…</span></div></main>;
   if (authState !== 'authenticated') return <AdminLogin onLogin={() => setAuthState('authenticated')} />;
-  return <div className="app-shell"><AppHeader view={view} setView={setView} onLogout={logout} logoutPending={logoutPending}/><main id="main-content">{logoutError && <p role="alert" className="mx-auto max-w-3xl px-4 pt-4 text-sm text-danger">{logoutError}</p>}{view === 'dashboard' ? <LinkDashboard onCreateLink={() => setView('create')} initialExpanded={createdLink?.showAnalytics ? createdLink.id : null} /> : view === 'flows' ? <FlowWorkspace /> : <CreateLinkPage onCreated={(link) => { setCreatedLink(link); if (link.showAnalytics) setView('dashboard'); }} />}</main><footer className="safe-bottom border-t border-line bg-surface px-4 py-5 text-center text-xs text-muted">Linkify <span className="mx-1">·</span> A clearer way to share links.</footer></div>;
+  return <div className="app-shell"><AppHeader view={view} setView={(next) => { setView(next); if (next !== 'flows') setFlowToOpen(null); }} onLogout={logout} logoutPending={logoutPending}/><main id="main-content">{logoutError && <p role="alert" className="mx-auto max-w-3xl px-4 pt-4 text-sm text-danger">{logoutError}</p>}{view === 'dashboard' ? <LinkDashboard onCreateLink={() => setView('create')} onOpenFlow={(id) => { setFlowToOpen(id); setView('flows'); }} initialExpanded={createdLink?.showAnalytics ? createdLink.id : null} /> : view === 'flows' ? <Suspense fallback={<div className="mx-auto grid min-h-[60vh] max-w-7xl place-items-center px-4 text-sm text-muted" role="status">Loading Flows workspace…</div>}><FlowWorkspace initialFlowId={flowToOpen} /></Suspense> : <CreateLinkPage onCreated={(link) => { setCreatedLink(link); if (link.showAnalytics) setView('dashboard'); }} />}</main><footer className="safe-bottom border-t border-line bg-surface px-4 py-5 text-center text-xs text-muted">Linkify <span className="mx-1">·</span> A clearer way to share links.</footer></div>;
 }
 
 export default App;

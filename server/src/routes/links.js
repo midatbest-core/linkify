@@ -5,7 +5,7 @@ import mongoose from 'mongoose';
 import ClickEvent from '../models/ClickEvent.js';
 import { resolveAdaptiveDestination } from '../services/adaptiveRoutingService.js';
 
-function serializeLink(link, baseUrl) {
+export function serializeLink(link, baseUrl) {
   const isCustomAlias = link.isCustomAlias ?? !/^[0-9a-zA-Z]{7}$/.test(link.shortCode);
   const adaptiveRouting = link.adaptiveRouting?.toObject?.() ?? link.adaptiveRouting;
   const isoDate = (value) => {
@@ -17,6 +17,7 @@ function serializeLink(link, baseUrl) {
     shortCode: link.shortCode, shortUrl: `${baseUrl}/${link.shortCode}`,
     isCustomAlias, title: link.title ?? '', tags: link.tags ?? [],
     status: link.status ?? 'active', createdAt: link.createdAt, updatedAt: link.updatedAt ?? null,
+    management: link.management?.ownerType === 'flow' ? { ownerType: 'flow', flowId: link.management.flowId } : null,
     adaptiveRouting: adaptiveRouting ? {
       enabled: adaptiveRouting.enabled === true,
       defaultDestinationUrl: adaptiveRouting.defaultDestinationUrl ?? link.originalUrl,
@@ -159,7 +160,7 @@ export function createLinksRouter({ linkModel = Link, clickEventModel = ClickEve
       const baseUrl = (process.env.SHORT_BASE_URL ?? `${request.protocol}://${request.get('host')}`).replace(/\/$/, '');
       response.json({ link: serializeLink(link, baseUrl) });
     } catch (error) {
-      if (error.status === 400 || error.status === 409) return response.status(error.status).json({ error: error.message });
+      if (error.status === 400 || error.status === 409) return response.status(error.status).json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       next(error);
     }
   });
@@ -169,6 +170,7 @@ export function createLinksRouter({ linkModel = Link, clickEventModel = ClickEve
     try {
       const existing = await linkModel.findById(request.params.id);
       if (!existing) return response.status(404).json({ error: 'Link not found.' });
+      if (existing.management?.ownerType === 'flow') return response.status(409).json({ error: 'This link is managed by an Event Flow and cannot be deleted independently.', code: 'FLOW_MANAGED_LINK' });
       await clickEventModel.deleteMany({ linkId: existing._id });
       const deleted = await linkModel.findByIdAndDelete(request.params.id);
       if (!deleted) return response.status(404).json({ error: 'Link not found.' });

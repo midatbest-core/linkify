@@ -8,7 +8,14 @@ async function request(path, options) {
   catch (error) { if (error?.name === 'AbortError') throw error; throw new Error('Could not reach Linkify. Check your connection and try again.'); }
   let data;
   try { data = await response.json(); } catch { throw new Error('Linkify returned an unexpected response.'); }
-  if (!response.ok) { const error = new Error(data.error ?? 'The flow request failed.'); error.status = response.status; error.code = data.code; throw error; }
+  if (!response.ok) {
+    const error = new Error(data.error ?? 'The flow request failed.');
+    error.status = response.status;
+    error.code = data.code;
+    error.alias = data.alias;
+    error.suggestions = data.suggestions;
+    throw error;
+  }
   return data;
 }
 
@@ -19,4 +26,7 @@ export const flowApi = {
   update: (id, flow) => request(`/api/flows/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(flow) }),
   validate: (id, flow) => request(`/api/flows/${encodeURIComponent(id)}/validate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(flow) }),
   remove: (id) => request(`/api/flows/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  publish: (id, body, idempotencyKey) => request(`/api/flows/${encodeURIComponent(id)}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(body) }),
+  activeDestination: (id) => request(`/api/flows/${encodeURIComponent(id)}/active-destination`),
+  aliasAvailability: (alias) => request(`/api/aliases/${encodeURIComponent(alias)}/availability`),
 };

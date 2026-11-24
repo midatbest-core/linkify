@@ -38,6 +38,9 @@ const flowSchema = new mongoose.Schema({
   },
   publishedRevision: { type: Number, default: null },
   publishedConfiguration: { type: mongoose.Schema.Types.Mixed, default: null },
+  publishedAt: { type: Date, default: null },
+  publicationHistory: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  publicationRequests: { type: [new mongoose.Schema({ key: { type: String, required: true }, payloadHash: { type: String, required: true }, revision: { type: Number, required: true }, linkId: { type: mongoose.Schema.Types.ObjectId, required: true }, shortCode: { type: String, required: true }, publishedAt: { type: Date, required: true } }, { _id: false })], default: [] },
   linkId: { type: mongoose.Schema.Types.ObjectId, ref: 'Link', default: null },
 }, { collection: 'flows', timestamps: true });
 

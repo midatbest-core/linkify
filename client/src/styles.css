@@ -146,7 +146,18 @@ button:enabled { cursor: pointer; }
 .flow-card__description { display: -webkit-box; margin-top: 6px; overflow: hidden; color: #626e64; font-size: .8rem; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .flow-card__meta { display: flex; width: 100%; align-items: flex-end; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 18px; color: #626e64; font-size: .68rem; }
 .flow-save-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.flow-save-actions :is(.button-primary,.button-secondary,.button-danger):disabled { cursor: not-allowed; opacity: .48; box-shadow: none; transform: none; }
 .flow-unsaved { border-radius: 999px; padding: 5px 9px; color: #875d19; background: #fff2cf; font-size: .7rem; font-weight: 700; }
+.flow-publication-panel { display: grid; gap: 16px; margin-top: 18px; border: 1px solid #c9d8c3; border-radius: 16px; padding: 16px; background: linear-gradient(135deg,#f2f7ee 0%,#fffefa 70%); }
+.flow-publication-panel__summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.flow-publish-alias { display: grid; grid-template-columns: minmax(0,420px) auto; align-items: end; gap: 10px; }
+.flow-publish-alias label { display: grid; gap: 7px; }
+.flow-published-result { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 24px; }
+.flow-active-destination { display: grid; max-width: 660px; gap: 3px; margin-top: 14px; border-left: 3px solid #6c9863; padding: 8px 11px; background: rgba(255,254,250,.72); }
+.flow-active-destination span,.flow-active-destination small { color: #626e64; font-size: .68rem; }
+.flow-active-destination strong { overflow: hidden; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
+.flow-publish-confirm { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: rgba(22,31,25,.54); }
+.flow-publish-confirm > .panel { width: min(100%,480px); padding: 22px; box-shadow: 0 24px 70px -28px rgba(10,20,13,.75); }
 .flow-timeline { margin-top: 20px; border: 1px solid #e0e2d9; border-radius: 16px; background: #fffefa; overflow: hidden; }
 .flow-timeline__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; }
 .flow-timeline__event { display: flex; flex-wrap: wrap; gap: 8px 20px; border-block: 1px solid #e4e5dc; padding: 10px 16px; color: #626e64; background: #f8f7f2; font-size: .72rem; }
@@ -179,6 +190,9 @@ button:enabled { cursor: pointer; }
   .flow-timeline__phase::before { top: -5px; left: 13px; width: 2px; height: 14px; }
   .flow-timeline__phase:nth-child(3)::before { display: block; }
   .flow-card__meta { align-items: flex-start; flex-direction: column; }
+  .flow-publication-panel__summary,.flow-published-result { align-items: stretch; grid-template-columns: minmax(0,1fr); flex-direction: column; }
+  .flow-publish-alias { grid-template-columns: minmax(0,1fr); }
+  .flow-published-result > :last-child { justify-self: center; }
 }
 .overview-details > summary { min-height: 44px; }
 .link-actions[open] { grid-column: 1 / -1; flex-basis: 100%; }

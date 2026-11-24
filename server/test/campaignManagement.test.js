@@ -160,6 +160,129 @@ test('experimentService: sticky variant selection honors existing cookie', () =>
   assert.equal(selection.isNewAssignment, false);
 });
 
+test('experimentService: 1,000 independent visitor assignments at 50/50 split are statistically balanced', () => {
+  const experiment = {
+    enabled: true,
+    variants: [
+      { variantId: 'var-a', label: 'Variant A', destinationUrl: 'https://example.com/a', weight: 50 },
+      { variantId: 'var-b', label: 'Variant B', destinationUrl: 'https://example.com/b', weight: 50 },
+    ],
+  };
+
+  let countA = 0;
+  let countB = 0;
+  for (let i = 0; i < 1000; i++) {
+    const selection = selectVariant(experiment, {}, { shortCode: 'statLink', stageId: 'default' });
+    assert.equal(selection.isNewAssignment, true);
+    if (selection.variant.variantId === 'var-a') countA++;
+    else if (selection.variant.variantId === 'var-b') countB++;
+  }
+
+  assert.equal(countA + countB, 1000);
+  assert.ok(countA >= 430 && countA <= 570, `Count A (${countA}) should be reasonably balanced around 500`);
+  assert.ok(countB >= 430 && countB <= 570, `Count B (${countB}) should be reasonably balanced around 500`);
+});
+
+test('experimentService: supports 80/20, 100/0, and 0/100 weight configurations', () => {
+  // 1. 80/20 split
+  const exp8020 = {
+    enabled: true,
+    variants: [
+      { variantId: 'var-a', label: 'Variant A', destinationUrl: 'https://example.com/a', weight: 80 },
+      { variantId: 'var-b', label: 'Variant B', destinationUrl: 'https://example.com/b', weight: 20 },
+    ],
+  };
+  let count80 = 0;
+  for (let i = 0; i < 1000; i++) {
+    const s = selectVariant(exp8020, {}, { shortCode: 'link8020', stageId: 'default' });
+    if (s.variant.variantId === 'var-a') count80++;
+  }
+  assert.ok(count80 >= 740 && count80 <= 860, `Count A (${count80}) should be reasonably close to 800 for 80/20 split`);
+
+  // 2. 100/0 split (Variant A gets 100% of traffic)
+  const norm100 = normalizeAndValidateExperiments({
+    enabled: true,
+    variants: [
+      { variantId: 'var-a', destinationUrl: 'https://example.com/a', weight: 100 },
+      { variantId: 'var-b', destinationUrl: 'https://example.com/b', weight: 0 },
+    ],
+  });
+  assert.equal(norm100.error, undefined);
+  for (let i = 0; i < 1000; i++) {
+    const s = selectVariant(norm100.value, {}, { shortCode: 'link100', stageId: 'default' });
+    assert.equal(s.variant.variantId, 'var-a', '100/0 split must always select Variant A');
+  }
+
+  // 3. 0/100 split (Variant B gets 100% of traffic)
+  const norm0 = normalizeAndValidateExperiments({
+    enabled: true,
+    variants: [
+      { variantId: 'var-a', destinationUrl: 'https://example.com/a', weight: 0 },
+      { variantId: 'var-b', destinationUrl: 'https://example.com/b', weight: 100 },
+    ],
+  });
+  assert.equal(norm0.error, undefined);
+  for (let i = 0; i < 1000; i++) {
+    const s = selectVariant(norm0.value, {}, { shortCode: 'link0', stageId: 'default' });
+    assert.equal(s.variant.variantId, 'var-b', '0/100 split must always select Variant B');
+  }
+});
+
+test('experimentService: sticky assignment persists across repeated visits', () => {
+  const experiment = {
+    enabled: true,
+    variants: [
+      { variantId: 'var-a', label: 'Variant A', destinationUrl: 'https://example.com/a', weight: 50 },
+      { variantId: 'var-b', label: 'Variant B', destinationUrl: 'https://example.com/b', weight: 50 },
+    ],
+  };
+
+  const initial = selectVariant(experiment, {}, { shortCode: 'repeatLink', stageId: 'default' });
+  assert.equal(initial.isNewAssignment, true);
+  const assignedId = initial.variant.variantId;
+  const clientCookies = { [initial.cookieName]: initial.cookieValue };
+
+  for (let i = 0; i < 50; i++) {
+    const repeat = selectVariant(experiment, clientCookies, { shortCode: 'repeatLink', stageId: 'default' });
+    assert.equal(repeat.isNewAssignment, false);
+    assert.equal(repeat.variant.variantId, assignedId, 'Returning visitor must stick to assigned variant');
+  }
+});
+
+test('experimentService: isolates experiments across links and Flow stages', () => {
+  const expLink1 = {
+    enabled: true,
+    variants: [
+      { variantId: 'v-alpha', label: 'Alpha', destinationUrl: 'https://example.com/alpha', weight: 50 },
+      { variantId: 'v-beta', label: 'Beta', destinationUrl: 'https://example.com/beta', weight: 50 },
+    ],
+  };
+  const expLink2 = {
+    enabled: true,
+    variants: [
+      { variantId: 'v-one', label: 'One', destinationUrl: 'https://example.com/1', weight: 50 },
+      { variantId: 'v-two', label: 'Two', destinationUrl: 'https://example.com/2', weight: 50 },
+    ],
+  };
+
+  const cookies = {
+    linkify_ab_link1_default: 'v-beta',
+    linkify_ab_flow1_stageBefore: 'v-alpha',
+  };
+
+  const resLink1 = selectVariant(expLink1, cookies, { shortCode: 'link1', stageId: 'default' });
+  assert.equal(resLink1.isNewAssignment, false);
+  assert.equal(resLink1.variant.variantId, 'v-beta');
+
+  const resLink2 = selectVariant(expLink2, cookies, { shortCode: 'link2', stageId: 'default' });
+  assert.equal(resLink2.isNewAssignment, true);
+  assert.equal(resLink2.cookieName, 'linkify_ab_link2_default');
+
+  const resStageDuring = selectVariant(expLink1, cookies, { shortCode: 'flow1', stageId: 'stageDuring' });
+  assert.equal(resStageDuring.isNewAssignment, true);
+  assert.equal(resStageDuring.cookieName, 'linkify_ab_flow1_stageDuring');
+});
+
 test('csvExport: protects against spreadsheet formula injection and respects RFC 4180', () => {
   const headers = [
     { label: 'Name', key: 'name' },

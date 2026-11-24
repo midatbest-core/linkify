@@ -49,7 +49,7 @@ function FlowList({ flows, loading, error, onNew, onOpen, onRefresh }) {
           <h1 className="mt-2 text-3xl font-semibold tracking-[-.045em] sm:text-4xl">Event routing flows</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">Create, schedule, and publish one permanent event link across its lifecycle.</p>
         </div>
-        <button className="button-primary" type="button" onClick={onNew}>Create event flow</button>
+        <button data-testid="create-flow-button" className="button-primary" type="button" onClick={onNew}>Create event flow</button>
       </header>
       {error && (
         <div className="flow-library__notice" role="alert">
@@ -88,7 +88,7 @@ function FlowList({ flows, loading, error, onNew, onOpen, onRefresh }) {
           <div className="flow-empty__icon" aria-hidden="true">⌘</div>
           <h2 className="mt-4 text-xl font-semibold">No saved flows yet</h2>
           <p className="mt-2 text-sm leading-6 text-muted">Create an Event Lifecycle draft and save its graph, destinations, and creator timezone.</p>
-          <button className="button-primary mt-5" type="button" onClick={onNew}>Create your first flow</button>
+          <button data-testid="create-first-flow-button" className="button-primary mt-5" type="button" onClick={onNew}>Create your first flow</button>
         </div>
       )}
     </section>
@@ -460,7 +460,7 @@ function Editor({ initialFlow, initialValidation, initialPublication, onClose, o
         <div className="flow-save-actions">
           {activeTab === 'builder' && (
             <>
-              <button className="button-secondary" type="button" onClick={() => setEventSettingsOpen(true)}>Event Settings</button>
+              <button data-testid="event-settings-toolbar-button" className="button-secondary" type="button" onClick={() => setEventSettingsOpen(true)}>Event Settings</button>
               <button className="button-secondary" type="button" onClick={clearGraph}>New blank graph</button>
               <button className="button-secondary" type="button" onClick={loadTemplate}>Reset template</button>
               <button className="button-secondary" type="button" disabled={!nodes.some((node) => node.data.kind === 'router') || nodes.length >= 50} onClick={addStage}>+ Add stage</button>
@@ -829,36 +829,38 @@ function Editor({ initialFlow, initialValidation, initialPublication, onClose, o
       )}
 
       {/* Dedicated Event Settings Modal */}
-      <EventSettingsModal
-        isOpen={eventSettingsOpen}
-        isInitial={false}
-        initialData={{
-          eventName: draft.eventName,
-          description: draft.description,
-          eventStartLocal: draft.eventStartLocal,
-          eventEndLocal: draft.eventEndLocal,
-          creatorTimeZone: draft.creatorTimeZone,
-          eventStartDisambiguation: draft.eventStartDisambiguation,
-          eventEndDisambiguation: draft.eventEndDisambiguation,
-        }}
-        onSave={(updated) => {
-          if (updated.creatorTimeZone !== draft.creatorTimeZone && (draft.eventStartAtUtc || draft.eventEndAtUtc)) {
-            updateDraft({
-              eventName: updated.eventName,
-              description: updated.description,
-              eventStartLocal: updated.eventStartLocal,
-              eventEndLocal: updated.eventEndLocal,
-              eventStartDisambiguation: updated.eventStartDisambiguation,
-              eventEndDisambiguation: updated.eventEndDisambiguation,
-            });
-            setPendingTimeZone(updated.creatorTimeZone);
-          } else {
-            updateDraft(updated);
-          }
-          setEventSettingsOpen(false);
-        }}
-        onClose={() => setEventSettingsOpen(false)}
-      />
+      {eventSettingsOpen && (
+        <EventSettingsModal
+          isOpen={eventSettingsOpen}
+          isInitial={false}
+          initialData={{
+            eventName: draft.eventName,
+            description: draft.description,
+            eventStartLocal: draft.eventStartLocal,
+            eventEndLocal: draft.eventEndLocal,
+            creatorTimeZone: draft.creatorTimeZone,
+            eventStartDisambiguation: draft.eventStartDisambiguation,
+            eventEndDisambiguation: draft.eventEndDisambiguation,
+          }}
+          onSave={(updated) => {
+            if (updated.creatorTimeZone !== draft.creatorTimeZone && (draft.eventStartAtUtc || draft.eventEndAtUtc)) {
+              updateDraft({
+                eventName: updated.eventName,
+                description: updated.description,
+                eventStartLocal: updated.eventStartLocal,
+                eventEndLocal: updated.eventEndLocal,
+                eventStartDisambiguation: updated.eventStartDisambiguation,
+                eventEndDisambiguation: updated.eventEndDisambiguation,
+              });
+              setPendingTimeZone(updated.creatorTimeZone);
+            } else {
+              updateDraft(updated);
+            }
+            setEventSettingsOpen(false);
+          }}
+          onClose={() => setEventSettingsOpen(false)}
+        />
+      )}
     </section>
   );
 }
@@ -934,24 +936,26 @@ export default function FlowWorkspace({ initialFlowId = null }) {
         onOpen={open}
         onRefresh={load}
       />
-      <EventSettingsModal
-        isOpen={createModalOpen}
-        isInitial={true}
-        onSave={(formData) => {
-          const initialDraft = createFlowDraft(formData.creatorTimeZone);
-          initialDraft.eventName = formData.eventName;
-          initialDraft.description = formData.description;
-          initialDraft.eventStartLocal = formData.eventStartLocal;
-          initialDraft.eventEndLocal = formData.eventEndLocal;
-          initialDraft.eventStartDisambiguation = formData.eventStartDisambiguation;
-          initialDraft.eventEndDisambiguation = formData.eventEndDisambiguation;
-          setActive(initialDraft);
-          setActiveValidation(null);
-          setActivePublication(null);
-          setCreateModalOpen(false);
-        }}
-        onClose={() => setCreateModalOpen(false)}
-      />
+      {createModalOpen && (
+        <EventSettingsModal
+          isOpen={createModalOpen}
+          isInitial={true}
+          onSave={(formData) => {
+            const initialDraft = createFlowDraft(formData.creatorTimeZone);
+            initialDraft.eventName = formData.eventName;
+            initialDraft.description = formData.description;
+            initialDraft.eventStartLocal = formData.eventStartLocal;
+            initialDraft.eventEndLocal = formData.eventEndLocal;
+            initialDraft.eventStartDisambiguation = formData.eventStartDisambiguation;
+            initialDraft.eventEndDisambiguation = formData.eventEndDisambiguation;
+            setActive(initialDraft);
+            setActiveValidation(null);
+            setActivePublication(null);
+            setCreateModalOpen(false);
+          }}
+          onClose={() => setCreateModalOpen(false)}
+        />
+      )}
     </>
   );
 }

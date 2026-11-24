@@ -38,8 +38,8 @@ export function normalizeAndValidateExperiments(input) {
       return { error: `Variant ${i + 1} URL: ${dest.error}` };
     }
     const weight = Number(v.weight);
-    if (!Number.isInteger(weight) || weight < 1 || weight > 99) {
-      return { error: `Variant ${i + 1} weight must be an integer between 1 and 99.` };
+    if (!Number.isInteger(weight) || weight < 0 || weight > 100) {
+      return { error: `Variant ${i + 1} weight must be an integer between 0 and 100.` };
     }
     totalWeight += weight;
     normalizedVariants.push({

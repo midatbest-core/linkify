@@ -19,7 +19,7 @@ export default function ExperimentEditor({ value = {}, onChange, disabled = fals
   }
 
   function handleWeightChange(newWeightA) {
-    const clampedA = Math.max(1, Math.min(99, Math.round(newWeightA)));
+    const clampedA = Math.max(0, Math.min(100, Math.round(newWeightA)));
     const weightB = 100 - clampedA;
     onChange({
       enabled: true,
@@ -62,6 +62,9 @@ export default function ExperimentEditor({ value = {}, onChange, disabled = fals
       <p className="mt-1 text-xs text-muted">
         Distribute incoming audience traffic between two destination URLs using sticky first-party assignment.
       </p>
+      <p className="mt-1 text-[11px] text-muted">
+        Returning visitors retain their assigned variant for 24 hours via a secure first-party cookie.
+      </p>
 
       {enabled && (
         <div className="mt-4 grid gap-4 border-t border-line pt-3.5">
@@ -88,8 +91,8 @@ export default function ExperimentEditor({ value = {}, onChange, disabled = fals
 
             <input
               type="range"
-              min="1"
-              max="99"
+              min="0"
+              max="100"
               step="1"
               value={varA.weight}
               disabled={disabled}

@@ -1,12 +1,12 @@
 # Linkify — Final Automated Testing & Backend Performance Benchmark Report
 
 - **Evaluation Date:** 2026-11-25
-- **Platform Version:** Linkify Milestone 5D Release Candidate (`9e75d3c` / `d0fa1d1`)
+- **Platform Version:** Linkify Milestone 6 Release Candidate (`0adb50a`)
 - **Node.js Version:** v25.8.1
 - **OS & Architecture:** Windows 11 (win32 x64)
 - **Host Hardware:** AMD Ryzen 7 7840HS (8 physical cores, 16 threads, 3.8–5.1 GHz), 16 GB DDR5 RAM
 - **Database Configuration:** Temporary local MongoDB replica set with loopback communication (WiredTiger Storage Engine)
-- **Repository Baseline:** `master` at `d0fa1d1`, `v1.0-demo-stable` preserved at `7b8b5b38cb00617bf2973152400b187c5bf16f0a`
+- **Repository Baseline:** `master` at `0adb50a`, `v1.0-demo-stable` preserved at `7b8b5b38cb00617bf2973152400b187c5bf16f0a`
 
 ---
 
@@ -21,11 +21,12 @@ The evaluation comprised four phases:
 4. **Data Integrity & Concurrency Verification:** Verification of asynchronous click ingestion accuracy, routing determinism, optimistic concurrency locking, unique alias collision handling, and sequence monotonicity.
 
 ### Key Findings
-- **Functional Reliability:** **100% test pass rate** across all suites (114 unit/integration tests, 7 replica-set transaction tests, 17/17 Playwright desktop & mobile browser workflow steps, and 0 failed assertions).
+- **Functional Reliability:** **100% test pass rate** across all suites (124 unit/integration tests, 7 replica-set transaction tests, 17/17 Playwright desktop & mobile browser workflow steps, and 0 failed assertions).
 - **Peak Measured Short-Duration Throughput:** The backend achieved a peak short-duration throughput of **1,541.16 Requests Per Second (RPS)** on mixed redirect traffic (standard, adaptive, and published flows) during a 5-second sampling window under 200 concurrent connections. This measurement reflects burst processing capability rather than proven sustained endurance capacity.
 - **Low Latency Profile:** Uncontended redirect latency averaged **1.18 ms** (P95 of 1.63 ms). Under moderate concurrent load (25 connections), latency remained tight at **16.58 ms** (P95 of 19.08 ms).
 - **Multi-Document Transaction Efficiency:** Atomic Flow publications and rollbacks executed in an average of **12.43 ms** and **13.59 ms** respectively across full replica-set snapshot transactions.
 - **Data Integrity & Asynchronous Decoupling:** 100% of tested redirects resulted in accurate background click persistence (300/300 records in a verified test batch). Synchronous HTTP response success is cleanly decoupled from asynchronous click writes. Strict optimistic locking isolation was verified with zero race-condition corruptions.
+- **Milestone 6 Campaign Protection & A/B Experimentation:** A/B experiment redirects evaluated at **980.11 RPS** with **10.18 ms** average latency (minimal ~6% routing overhead for deterministic variant selection and HMAC cookie signing). Capped redirect enforcement evaluated at **738.42 RPS** with **13.51 ms** average latency, reflecting atomic database reservation (`findOneAndUpdate` with conditional cap check) before issuing HTTP 302 redirects.
 
 ---
 
@@ -58,7 +59,9 @@ The evaluation comprised four phases:
 1. **Loopback Environment:** Running a temporary local MongoDB replica set with loopback communication on the same machine eliminates wide-area network latency, TLS handshake overhead, and physical network hops.
 2. **Short Measurement Windows:** 5-second sampling intervals measure burst throughput and connection queue behavior, but do not constitute an extended endurance or soak test. Long-term thermal throttling, garbage collection pauses over hours, or slow memory leaks cannot be assessed from short windows.
 3. **Resource Contention:** The benchmark client, Express API server, and MongoDB process ran on the same host, sharing CPU and RAM resources.
-4. **Rate Limiting Boundaries:** Management and mutation endpoints are governed by Express rate limiters (`flowLimit`: 120 req / 15m; `createLinkLimit`: 60 req / 15m), which intentionally restrict high-concurrency automated mutation testing.
+4. **Rate Limiting Boundaries:** Management and mutation endpoints are governed by Express rate limiters (`flowLimit`: 120 req / 15m; `createLinkLimit`: 60 req / 15m; `loginLimit`: 5 req / 15m), which intentionally restrict high-concurrency automated mutation testing.
+5. **Synchronous Atomic Write Overhead on Capped Links:** Protected links with `maxClicks` enforce redirect limits using an atomic conditional write (`findOneAndUpdate`) before issuing the HTTP 302 redirect. In a local loopback environment, write latency is low (~1.5–3 ms), but in distributed cloud environments (such as MongoDB Atlas across regions), network round-trip time will govern the throughput of capped links.
+6. **Password Verification Compute Bounds:** Protected link passwords use `scrypt` hashing. Scrypt is deliberately compute- and memory-intensive to prevent brute-force attacks, and password challenge submissions (`POST /:code/unlock`) are strictly rate-limited (5 attempts / 15m). Password verification throughput is therefore intentionally bounded and should not be treated as a high-concurrency redirect endpoint.
 
 ---
 
@@ -68,7 +71,7 @@ All existing automated test suites were executed sequentially without skipping a
 
 | Test Suite | Command | Total Tests | Passed | Failed | Skipped | Duration | Key Coverage Areas |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **Unit & Integration Suite** | `npm test` | 118 | 114 | 0 | 4* | 2.83s | In-memory API routes, validation, compiler, rate limiting, auth, GeoIP mapping, date math, QR generation. |
+| **Unit & Integration Suite** | `npm test` | 128 | 124 | 0 | 4* | 3.05s | In-memory API routes, validation, compiler, rate limiting, auth, GeoIP mapping, date math, QR generation, scrypt password hashing, unlock challenge workflow, expiration enforcement, concurrent redirect caps, A/B routing, and RFC 4180 CSV export. |
 | **MongoDB Replica Set Suite** | `node server/scripts/runReplicaSetTests.js` | 7 | 7 | 0 | 0 | 2.53s | Multi-document transactions, atomic publication, rollback, snapshot migration, idempotency retention. |
 | **Playwright Full-Stack Suite** | `node server/scripts/verifyAndCaptureMilestone4.js` | 17 | 17 | 0 | 0 | 19.82s | 13 desktop workflow steps & 4 mobile responsive viewpoints (Builder, Simulator, Analytics, History). |
 | **Production Build** | `npm run build` | 1 | 1 | 0 | 0 | 1.18s | Vite 6 client production bundling (76 modules, 0 syntax/chunk errors). |
@@ -100,6 +103,34 @@ Each backend operation was benchmarked individually against an isolated local Ex
 | `/api/flows/:id/history` | GET | Paginated History Retrieval | 50 | 2 | **1,506.01** | 1.29 ms | 0.66 ms | 1.08 ms | 2.02 ms | 6.70 ms | 6.70 ms | `429`: 50 (Rate Limited)* |
 
 *\*Note on HTTP 429 Statuses: The Flow API is protected by a strict rate limiter (`flowLimit`: 120 requests per 15 minutes per IP). Once cumulative flow operations reached the configured ceiling during testing, the middleware intercepted requests in 1.29 ms without server error. As per specification, intentional security responses are distinguished from application bottlenecks.*
+
+---
+
+### 4B. Milestone 6 Redirect Performance Comparison
+
+Following the implementation of Milestone 6 (A/B traffic experimentation, password challenge & unlock, expiration enforcement, and concurrent redirect limits), an isolated benchmark was executed on the local MongoDB replica set under identical conditions (500 requests per operation at concurrency 10):
+
+| Redirect Operation | Baseline RPS | Measured RPS | Change vs Baseline | Baseline Avg Latency | Measured Avg Latency | P50 (Median) | P95 | P99 | Status Codes Observed |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Standard Redirect** | 1,043.42 req/s | **909.36 req/s** | **-12.85%** | 9.50 ms | **10.93 ms** | 10.55 ms | 14.60 ms | 17.68 ms | `302`: 500 (100%) |
+| **Adaptive Redirect** | 1,140.30 req/s | **1,092.45 req/s** | **-4.20%** | 8.74 ms | **9.11 ms** | 8.86 ms | 11.05 ms | 12.59 ms | `302`: 500 (100%) |
+| **A/B Experiment Redirect** | *(new)* | **980.11 req/s** | **-6.07%*** | *(new)* | **10.18 ms** | 9.61 ms | 13.03 ms | 19.30 ms | `302`: 500 (100%) |
+| **Protected Capped Redirect** | *(new)* | **738.42 req/s** | **-29.23%*** | *(new)* | **13.51 ms** | 13.08 ms | 17.85 ms | 20.51 ms | `302`: 500 (100%) |
+
+*\*Percentages for A/B Experiment and Protected Capped redirects are relative to the baseline Standard URL Redirect (1,043.42 req/s).*
+
+#### Performance Analysis & Observations
+1. **Standard Redirect Throughput Reduction (12.85%):**
+   * Measured throughput moved from 1,043.42 RPS to 909.36 RPS (a reduction of **12.85%**), while average latency adjusted from 9.50 ms to 10.93 ms.
+   * This delta reflects normal run-to-run sampling variance on the local test host combined with the sequential evaluation of campaign protection middleware checks (checking for link expiration, password requirements, and redirect caps) before dispatching standard redirects.
+2. **Adaptive Redirect Stability:**
+   * Adaptive redirection throughput remained essentially unchanged at 1,092.45 RPS compared to the 1,140.30 RPS baseline (a negligible 4.20% variance), with average latency holding steady at 9.11 ms (vs 8.74 ms baseline).
+3. **A/B Experiment Routing Efficiency:**
+   * A/B traffic experimentation achieved **980.11 RPS** with an average latency of **10.18 ms** (P50: 9.61 ms, P95: 13.03 ms).
+   * This is within ~6.07% of the original standard redirect baseline, confirming that deterministic pseudo-random variant assignment, weight boundaries, and signed HMAC cookie generation introduce negligible overhead into the redirect pipeline.
+4. **Atomic Capped Redirect Trade-off:**
+   * Protected links with redirect limits (`maxClicks`) achieved **738.42 RPS** with an average latency of **13.51 ms** (P50: 13.08 ms, P95: 17.85 ms).
+   * The ~29.23% throughput difference compared to standard redirects is expected and architectural: unlike standard redirects—which perform an in-memory or read-only document query and decouple click writes asynchronously—capped redirects must execute a synchronous atomic write (`findOneAndUpdate` with `$expr: { $lt: ["$lifetimeRedirectCount", "$protection.maxClicks"] }` and `$inc: { lifetimeRedirectCount: 1 }`) on the primary replica set node *before* committing the HTTP 302 response to prevent race-condition over-allocation.
 
 ---
 

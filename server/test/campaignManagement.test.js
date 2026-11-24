@@ -18,6 +18,7 @@ import {
 import { generateCsv } from '../src/utils/csvExport.js';
 import { compileFlowToAdaptiveRouting } from '../src/services/flowCompiler.js';
 import { normalizeFlowPayload } from '../src/services/flowService.js';
+import { createApp } from '../src/app.js';
 
 test('linkProtectionService: hashes and verifies passwords using scrypt', async () => {
   const password = 'SuperSecretPassword123!';
@@ -420,6 +421,170 @@ test('redirect & protection integration: expired, capped, and password-protected
     });
     assert.equal(resAbSticky.status, 302);
     assert.equal(resAbSticky.headers.get('location'), 'https://example.com/variant-b');
+  } finally {
+    server.close();
+  }
+});
+
+test('combined campaign workflow: password unlock, rejection, expiration, concurrent cap enforcement, A/B routing, and report accuracy', async () => {
+  const links = new Map();
+  const clickEvents = [];
+
+  const linkModel = {
+    async findOne(filter) {
+      if (filter.shortCode) return links.get(filter.shortCode) ?? null;
+      if (filter._id) return [...links.values()].find((l) => l._id === filter._id) ?? null;
+      return null;
+    },
+    async findOneAndUpdate(filter, update) {
+      const link = links.get(filter.shortCode) ?? [...links.values()].find((l) => l._id === filter._id);
+      if (!link) return null;
+      if (filter.$expr) {
+        const currentCount = link.lifetimeRedirectCount ?? 0;
+        const max = link.protection?.maxClicks ?? 0;
+        if (!(currentCount < max)) return null;
+      }
+      if (update.$inc) {
+        for (const [k, v] of Object.entries(update.$inc)) {
+          link[k] = (link[k] ?? 0) + v;
+        }
+      }
+      if (update.$set) {
+        Object.assign(link, update.$set);
+      }
+      return link;
+    },
+  };
+
+  const clickEventModel = {
+    async create(event) {
+      const record = { ...event, _id: `clk_${clickEvents.length + 1}` };
+      clickEvents.push(record);
+      return record;
+    },
+  };
+
+  const app = createApp({ linkModel, clickEventModel });
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Password Protection Workflow: rejection -> successful unlock -> cookie access
+    const pwHash = await hashLinkPassword('CampaignPass2026!');
+    links.set('pwflow', {
+      _id: '507f1f77bcf86cd799439021',
+      shortCode: 'pwflow',
+      originalUrl: 'https://example.com/pw-target',
+      protection: { enabled: true, passwordHash: pwHash },
+      lifetimeRedirectCount: 0,
+    });
+
+    // 1a. Unauthenticated GET -> 200 HTML challenge
+    const resChallenge = await fetch(`${baseUrl}/pwflow`, { redirect: 'manual' });
+    assert.equal(resChallenge.status, 200);
+    const htmlChallenge = await resChallenge.text();
+    assert.ok(htmlChallenge.includes('Password Required'));
+
+    // 1b. Incorrect password -> 401 with error message
+    const resBadPw = await fetch(`${baseUrl}/pwflow/unlock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'password=wrongPass',
+      redirect: 'manual',
+    });
+    assert.equal(resBadPw.status, 401);
+    const htmlBadPw = await resBadPw.text();
+    assert.ok(htmlBadPw.includes('Incorrect password'));
+    assert.ok(clickEvents.some((c) => c.linkId === '507f1f77bcf86cd799439021' && c.accessStatus === 'blocked_password'));
+
+    // 1c. Correct password -> 302 redirect with unlock cookie
+    const resGoodPw = await fetch(`${baseUrl}/pwflow/unlock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'password=CampaignPass2026!',
+      redirect: 'manual',
+    });
+    assert.equal(resGoodPw.status, 302);
+    const cookieHeader = resGoodPw.headers.get('set-cookie');
+    assert.ok(cookieHeader && cookieHeader.includes('linkify_unlocked_pwflow='));
+
+    // 1d. Access with unlock cookie -> 302 redirect to originalUrl
+    const match = cookieHeader.match(/linkify_unlocked_pwflow=([^;]+)/);
+    const resUnlocked = await fetch(`${baseUrl}/pwflow`, {
+      headers: { Cookie: `linkify_unlocked_pwflow=${match[1]}` },
+      redirect: 'manual',
+    });
+    assert.equal(resUnlocked.status, 302);
+    assert.equal(resUnlocked.headers.get('location'), 'https://example.com/pw-target');
+
+    // 2. Expiration Enforcement Workflow
+    links.set('expflow', {
+      _id: '507f1f77bcf86cd799439022',
+      shortCode: 'expflow',
+      originalUrl: 'https://example.com/exp-target',
+      protection: { enabled: true, expiresAt: new Date(Date.now() - 60000) },
+      lifetimeRedirectCount: 0,
+    });
+    const resExp = await fetch(`${baseUrl}/expflow`, { redirect: 'manual' });
+    assert.equal(resExp.status, 410);
+    assert.ok(clickEvents.some((c) => c.linkId === '507f1f77bcf86cd799439022' && c.accessStatus === 'blocked_expired'));
+
+    // 3. Concurrent Redirect-Cap Enforcement Workflow (10 concurrent requests for cap: 3)
+    links.set('capflow', {
+      _id: '507f1f77bcf86cd799439023',
+      shortCode: 'capflow',
+      originalUrl: 'https://example.com/cap-target',
+      protection: { enabled: true, maxClicks: 3 },
+      lifetimeRedirectCount: 0,
+    });
+
+    const concurrentRequests = Array.from({ length: 10 }, () =>
+      fetch(`${baseUrl}/capflow`, { redirect: 'manual' })
+    );
+    const responses = await Promise.all(concurrentRequests);
+    const statusCodes = responses.map((r) => r.status);
+    const successes = statusCodes.filter((s) => s === 302).length;
+    const blocked = statusCodes.filter((s) => s === 410).length;
+
+    assert.equal(successes, 3, 'Exactly 3 requests must succeed before the cap is reached');
+    assert.equal(blocked, 7, 'Remaining 7 concurrent requests must receive 410 Gone');
+    assert.equal(links.get('capflow').lifetimeRedirectCount, 3, 'Counter must stop exactly at cap');
+
+    // Verify click event logging accuracy: 3 allowed, 7 blocked_max_clicks
+    const capClicks = clickEvents.filter((c) => c.linkId === '507f1f77bcf86cd799439023');
+    assert.equal(capClicks.filter((c) => c.accessStatus === 'allowed').length, 3);
+    assert.equal(capClicks.filter((c) => c.accessStatus === 'blocked_max_clicks').length, 7);
+
+    // 4. A/B Routing Workflow with Sticky Cookie
+    links.set('abflow', {
+      _id: '507f1f77bcf86cd799439024',
+      shortCode: 'abflow',
+      originalUrl: 'https://example.com/default-target',
+      experiments: {
+        enabled: true,
+        variants: [
+          { variantId: 'v-alpha', label: 'Alpha', destinationUrl: 'https://example.com/alpha', weight: 50 },
+          { variantId: 'v-beta', label: 'Beta', destinationUrl: 'https://example.com/beta', weight: 50 },
+        ],
+      },
+      lifetimeRedirectCount: 0,
+    });
+
+    const resAbInit = await fetch(`${baseUrl}/abflow`, { redirect: 'manual' });
+    assert.equal(resAbInit.status, 302);
+    const assignedLocation = resAbInit.headers.get('location');
+    assert.ok(assignedLocation === 'https://example.com/alpha' || assignedLocation === 'https://example.com/beta');
+    const abSetCookie = resAbInit.headers.get('set-cookie');
+    assert.ok(abSetCookie && abSetCookie.includes('linkify_ab_abflow_default='));
+
+    // Sticky visitor verification
+    const resSticky = await fetch(`${baseUrl}/abflow`, {
+      headers: { Cookie: 'linkify_ab_abflow_default=v-beta' },
+      redirect: 'manual',
+    });
+    assert.equal(resSticky.status, 302);
+    assert.equal(resSticky.headers.get('location'), 'https://example.com/beta');
   } finally {
     server.close();
   }

@@ -37,7 +37,7 @@ The short URL and printed QR code stay exactly the same. No one has to reprint p
 - **Campaign analytics reports and CSV exports:** Dedicated campaign modal for each link showing:
   - Lifetime redirect counters and visual cap progress bars.
   - Traffic access breakdown (allowed visits vs blocked expired, cap reached or password challenge attempts). Blocked visits never inflate successful click metrics.
-  - A/B experiment conversion rates, click counts and percentage splits.
+  - A/B experiment traffic share, click counts and percentage splits.
   - Demographic breakdowns across devices, operating systems, browsers and top countries.
   - Clean printable report layout for sharing or saving as PDF (`@media print`).
   - Direct RFC 4180 CSV export protected against spreadsheet formula injection.

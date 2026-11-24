@@ -1,139 +1,366 @@
 # Linkify
 
-Linkify is a URL shortening and link management app built with MongoDB, Express, React, Node.js and Tailwind CSS. The approved project context is `Linkify_Project_Context_and_Documentation.pdf`.
+Linkify is a URL shortening and smart link management platform built using the MERN stack (MongoDB, Express, React, Node.js). I initially started this project as a simple URL shortener with QR code generation and click analytics. As the project grew, I wanted to explore how a single link could adapt to different visitor conditions and event schedules without having to create and share a new link every time.
 
-## Project structure
+This led to two core features: **Adaptive Links** (rule-based routing by device, country, schedule and UTM parameters) and **Linkify Flows** (a visual workflow builder that schedules different destinations across the lifecycle of an event).
+
+**Live application:** https://linkify-3jnh.vercel.app
+
+## What is Linkify intended for?
+
+Linkify is designed for event organizers, content creators, marketing teams and small businesses who want to manage shared links from a single dashboard.
+
+A practical example is a college festival or conference:
+- Organizers can print a single QR code on physical banners, posters and badges weeks before the event.
+- **Before the event:** The link redirects visitors to a registration or ticket page.
+- **During the event:** The same link automatically redirects visitors to the live stream, schedule or venue map.
+- **After the event:** The link redirects visitors to recordings, photos or a feedback form.
+
+The short URL and printed QR code stay exactly the same. No one has to reprint posters, update social media bios or send out replacement links.
+
+## Features
+
+- **URL shortening and custom aliases:** Shorten long URLs into clean links or custom aliases (3–40 alphanumeric characters). If an alias is already taken, Linkify suggests available alternatives.
+- **QR code generation:** Generate high-resolution QR codes for any short link and download them directly as PNG images.
+- **Link dashboard:** Search, filter, edit, archive and restore links. Soft-archiving a link returns HTTP 410 Gone, and restoring it immediately re-enables redirection.
+- **Privacy-preserving click analytics:** Track total clicks, daily traffic, devices (mobile, desktop, tablet), browsers, operating systems, referring websites and approximate geographic locations. To protect user privacy, raw IP addresses and raw User-Agent strings are never stored in the database. Click records automatically expire after 365 days via MongoDB TTL indexes.
+- **Adaptive Links:** Route visitors based on multiple criteria evaluated in priority order:
+  - Device type (mobile, desktop, tablet)
+  - Country (approximate lookup via local DB-IP City Lite database)
+  - Time schedules with timezone awareness
+  - Campaign UTM parameters (`utm_source`, `utm_medium`, `utm_campaign`)
+- **Linkify Flows (Event-driven visual workflows):**
+  - Interactive canvas built with React Flow (`@xyflow/react`) to connect entry points, routers, time-based stages and fallback destinations.
+  - Event schedule configuration with timezone support and automatic handling of daylight saving time transitions.
+  - Built-in routing simulator to test how visitors will be routed at different dates and times before publishing, without recording clicks.
+  - Atomic publication using MongoDB transactions to generate a live short link and save an immutable publication snapshot.
+  - Publication history with database-side pagination to inspect past snapshots, compare configurations and roll back to earlier versions.
+  - Historical flow analytics showing click distribution across destinations.
+  - Full flow lifecycle control: archive a flow to pause redirection (HTTP 410) and restore it at any time (HTTP 302).
+- **Admin authentication:** Management features are protected by session-based authentication with HttpOnly cookies (`SameSite=Lax; Secure` in production) and scrypt password hashing. Public link redirects and health checks remain accessible without login.
+- **Rate limiting and security:** Built-in rate limiters protect link creation, alias checking, flow mutations, analytics queries and login attempts against abuse.
+
+## Tech stack
+
+| Technology | Purpose |
+| --- | --- |
+| MongoDB / MongoDB Atlas | Primary database for links, click events, flows, publication history and admin sessions |
+| Express.js | Backend REST API, routing logic, rate limiting and redirect handling |
+| React 18 | Frontend user interface |
+| Node.js (Node 24) | Backend JavaScript runtime |
+| Vite | Frontend development server and production bundler |
+| Tailwind CSS v4 | Styling and responsive design |
+| Mongoose | Object data modeling and schema validation |
+| React Flow (`@xyflow/react`) | Interactive node-based canvas for Linkify Flows |
+| `qrcode.react` | SVG and canvas QR code rendering |
+| DB-IP City Lite / `maxmind` | Local MaxMind DB reader for approximate geographic lookups |
+| Playwright | End-to-end browser testing and screenshot verification |
+| Node.js test runner (`node --test`) | Built-in test runner for backend and frontend unit tests |
+| Vercel | Production frontend hosting with reverse proxy for API requests |
+| Render | Production backend web service hosting the Express API and redirects |
+
+## Folder structure
+
+The project is structured as an npm workspace containing separate `client` and `server` packages:
 
 ```text
-client/                 React + Vite + Tailwind application
-  src/pages/            Page-level UI
-  src/components/       Link creation, dashboard, analytics, and QR components
-  src/styles.css        Tailwind entry and global styles
-server/                 Express API
-  src/models/            Link and click event models
-  src/services/          Link and aggregation logic
-  src/config/            Database connection
-  src/routes/            Link, analytics, alias, and redirect routes
+linkify/
+├── client/                      # React frontend application
+│   ├── src/
+│   │   ├── components/          # Reusable UI components
+│   │   │   ├── FlowWorkspace.jsx    # React Flow builder workspace
+│   │   │   ├── FlowNode.jsx         # Custom canvas nodes
+│   │   │   ├── FlowInspector.jsx    # Node and stage property editor
+│   │   │   ├── FlowSimulator.jsx    # Interactive flow preview simulator
+│   │   │   ├── FlowTimeline.jsx     # Visual schedule timeline
+│   │   │   ├── FlowAnalytics.jsx    # Flow-level analytics breakdown
+│   │   │   ├── FlowHistory.jsx      # Snapshot history and rollback UI
+│   │   │   ├── LinkDashboard.jsx    # Link list, search, filters and metrics
+│   │   │   ├── AdaptiveRuleEditor.jsx # Rule builder for adaptive links
+│   │   │   └── QrCode.jsx           # QR code preview and PNG export
+│   │   ├── pages/
+│   │   │   └── App.jsx          # Main application page and auth state
+│   │   ├── utils/               # Frontend helpers, validation and API fetch wrappers
+│   │   ├── styles.css           # Global stylesheet and Tailwind imports
+│   │   └── main.jsx             # React DOM entry point
+│   ├── test/                    # Frontend unit and component tests
+│   ├── vite.config.js           # Vite build configuration
+│   └── package.json
+├── server/                      # Express backend application
+│   ├── src/
+│   │   ├── config/              # Database connection setup
+│   │   ├── middleware/          # Admin authentication, cookies and CORS checks
+│   │   ├── models/              # Mongoose schemas (Link, Flow, ClickEvent, etc.)
+│   │   ├── routes/              # API endpoints and public redirect handler
+│   │   ├── services/            # Business logic (flow publishing, intelligence, analytics)
+│   │   ├── utils/               # Timezone math, click classification, normalization
+│   │   ├── app.js               # Express application and route registration
+│   │   └── index.js             # Server startup and environment validation
+│   ├── scripts/                 # Maintenance, password hashing and testing scripts
+│   ├── test/                    # Backend API, compiler and MongoDB integration tests
+│   └── package.json
+├── .env.example                 # Template for environment configuration
+├── vercel.mjs                   # Vercel build-time reverse proxy configuration
+├── package.json                 # Monorepo root workspace configuration
+└── README.md
 ```
 
-## Requirements and setup
+## How the backend works
 
-- Node.js 20 or newer and npm
-- MongoDB locally, or a MongoDB Atlas connection string
+The frontend communicates with the Express backend over JSON endpoints. The backend handles request validation, authentication, link resolution, routing evaluation and database updates.
 
-Install dependencies with `npm install`, copy `.env.example` to `server/.env`, and set `MONGODB_URI`. Run `npm run dev` to start the API at `http://localhost:5000` and client at `http://localhost:5174`. Vite is pinned to port 5174 and exits with an error if that port is unavailable. Check readiness at `http://localhost:5000/api/health`.
+When a visitor opens a shortened URL:
+1. The backend extracts the short code and looks up the active link record in MongoDB.
+2. If the link is archived, the server returns an HTTP 410 Gone response.
+3. If the link is active and uses adaptive routing or a flow, the server checks the visitor context (device, country, simulated or current timestamp, and UTM parameters) against the configured rules.
+4. The server selects the matching stage destination, or falls back to the default URL if no rules match.
+5. The visitor receives an immediate HTTP 302 redirect to the destination URL.
+6. The click event is asynchronously recorded with anonymized metadata (device, browser, operating system, referrer hostname, approximate country and city).
 
-## Environment variables
+```mermaid
+flowchart TD
+    A["Visitor opens short URL"] --> B["Express backend"]
+    B --> C["Find link in MongoDB"]
+    C --> D{"Link status?"}
+    D -->|"Archived"| E["HTTP 410 Gone"]
+    D -->|"Not found"| F["HTTP 404 Not Found"]
+    D -->|"Active"| G{"Adaptive or Flow routing?"}
+    G -->|"Standard link"| H["Select original URL"]
+    G -->|"Rules configured"| I["Evaluate conditions in priority order"]
+    I -->|"Rule matched"| J["Select rule destination"]
+    I -->|"No match"| K["Select fallback destination"]
+    H --> L["HTTP 302 Redirect"]
+    J --> L
+    K --> L
+    L --> M["Record anonymized click analytics in MongoDB"]
+```
 
-| Variable | Used by | Purpose | Local default |
+### Main backend services
+
+| Service | File | Responsibility |
+| --- | --- | --- |
+| Flow compiler | `flowCompiler.js` | Converts visual React Flow graphs into deterministic routing rules |
+| Flow service | `flowService.js` | Handles flow creation, draft revisions, validation and listing |
+| Flow publishing | `flowPublishingService.js` | Executes atomic publish, rollback, archive and restore in MongoDB transactions |
+| Flow intelligence | `flowIntelligenceService.js` | Powers routing simulation, publication history pagination and destination analytics |
+| Adaptive routing | `adaptiveRoutingService.js` | Evaluates device, country, schedule and UTM conditions on incoming clicks |
+| Link service | `linkService.js` | Generates short codes, validates aliases and suggests alternatives |
+| Analytics service | `analyticsService.js` | Aggregates daily trends, device shares, referrers and geographic rankings |
+| GeoIP service | `geoIpService.js` | Maps IP addresses to approximate city and country using the local MMDB file |
+
+### Database models
+
+- **Link (`Link.js`):** Stores the short code, default destination URL, title, tags, status (`active` or `archived`), click counter and any inline adaptive routing rules. Has a unique index on `shortCode`.
+- **ClickEvent (`ClickEvent.js`):** Stores anonymized click metadata, matched destination ID and timestamps. Uses a compound index `{ linkId: 1, clickedAt: -1 }` for fast analytics and a TTL index on `clickedAt` that expires documents after 365 days.
+- **Flow (`Flow.js`):** Stores the event name, creator timezone, event schedule, visual draft graph (`nodes` and `edges`), current draft revision, active publication sequence and active published snapshot.
+- **FlowPublication (`FlowPublication.js`):** Dedicated collection storing immutable historical snapshots of published flows. Indexed with a unique compound index `{ flowId: 1, publicationNumber: -1 }`.
+- **AdminSession (`AdminSession.js`):** Stores hashed session tokens with credential versions and an automatic TTL expiry index (8 hours).
+
+Flow publication and rollback use MongoDB multi-document transactions to ensure that the link destination, flow document and publication snapshot are updated together.
+
+### API endpoints
+
+#### Public endpoints
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/:code` | Redirects to destination URL (HTTP 302) or returns 410 if archived |
+| GET | `/api/health` | Service and database readiness probe |
+
+#### Authentication
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| POST | `/api/auth/login` | Admin login with username and password (sets HttpOnly cookie) |
+| POST | `/api/auth/logout` | Clears admin session and cookie |
+| GET | `/api/auth/session` | Checks current admin session status |
+
+#### Link management (requires admin session)
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| POST | `/api/links` | Create a short link or adaptive link |
+| GET | `/api/links` | List links with pagination, search query, status and tag filters |
+| GET | `/api/links/:id` | Get link details and configuration |
+| PATCH | `/api/links/:id` | Update link destination, adaptive rules, tags, title or status |
+| DELETE | `/api/links/:id` | Delete a standalone link |
+| GET | `/api/aliases/:alias/availability` | Check if an alias is available and get suggestions if taken |
+
+#### Analytics (requires admin session)
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/api/analytics/overview` | Overall dashboard metrics, trends, top links and countries |
+| GET | `/api/links/:id/analytics` | Detailed analytics for an individual link over a date range |
+
+#### Linkify Flows (requires admin session)
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/api/flows` | List all event flows |
+| POST | `/api/flows` | Create a new event flow draft |
+| GET | `/api/flows/:id` | Get flow details, draft graph and active publication status |
+| PUT | `/api/flows/:id` | Save draft changes (increments draft revision) |
+| POST | `/api/flows/:id/publish` | Atomically publish draft to a short link (with custom alias support) |
+| POST | `/api/flows/:id/simulate` | Test routing for a given timestamp without writing to the database |
+| GET | `/api/flows/:id/history` | Paginated publication snapshot history |
+| GET | `/api/flows/:id/diff` | Compare draft or snapshots to inspect routing changes |
+| POST | `/api/flows/:id/rollback` | Atomically restore an earlier publication snapshot |
+| GET | `/api/flows/:id/analytics` | Flow destination click attribution analytics |
+| POST | `/api/flows/:id/archive` | Archive flow (turns live short URL into HTTP 410 Gone) |
+| POST | `/api/flows/:id/restore` | Restore flow (re-enables live HTTP 302 redirection) |
+
+## Getting started locally
+
+### 1. Prerequisites
+
+- **Node.js:** Node 24 is recommended (Node 20 or newer is supported).
+- **npm:** Included with Node.js.
+- **Git:** For cloning the repository.
+- **MongoDB:** A local MongoDB replica set or a free MongoDB Atlas cluster. A replica set is required for the multi-document transactions used by Flow publishing and rollback.
+
+### 2. Clone and install dependencies
+
+```bash
+git clone https://github.com/midatbest-core/linkify.git
+cd linkify
+npm install
+```
+
+### 3. Set up environment variables
+
+Copy `.env.example` to `server/.env`:
+
+```bash
+cp .env.example server/.env
+```
+
+Here is a summary of the environment variables used by the project:
+
+| Variable | Used by | Purpose | Local development default |
 | --- | --- | --- | --- |
-| `PORT` | Server | Listening port | `5000` |
-| `MONGODB_URI` | Server | MongoDB connection string | `mongodb://127.0.0.1:27017/linkify` |
-| `CLIENT_ORIGIN` | Server | Exact allowed browser origin for CORS | `http://localhost:5174` |
-| `SHORT_BASE_URL` | Server | Public base URL for generated links | `http://localhost:5000` |
-| `VITE_API_URL` | Client build | API origin; production uses the Vercel same-origin proxy | `http://localhost:5000` in development; set to `https://linkify-3jnh.vercel.app` for Vercel Production only |
-| `ADMIN_USERNAME` | Server | Temporary staging admin login name | unset |
-| `ADMIN_PASSWORD_HASH` | Server | scrypt-encoded admin password | unset |
-| `TRUST_PROXY_HOPS` | Server | Exact number of trusted reverse proxy hops | `0` locally; set explicitly for Render |
-| `GEOIP_DB_PATH` | Server | Path to DB-IP City Lite MMDB | `./data/dbip-city-lite-2026-11.mmdb` locally; `./data/dbip-city-lite.mmdb` on Render |
+| `PORT` | Server | Port the Express server listens on | `5000` |
+| `MONGODB_URI` | Server | MongoDB connection string (replica set recommended) | `mongodb://127.0.0.1:27017/linkify` |
+| `CLIENT_ORIGIN` | Server | Allowed frontend origin for CORS | `http://localhost:5174` |
+| `SHORT_BASE_URL` | Server | Public base URL used when constructing short links | `http://localhost:5000` |
+| `VITE_API_URL` | Client | API origin used by the frontend | `http://localhost:5000` |
+| `ADMIN_USERNAME` | Server | Admin username for the dashboard | (choose your own username) |
+| `ADMIN_PASSWORD_HASH` | Server | scrypt-hashed admin password | (generate using helper script) |
+| `TRUST_PROXY_HOPS` | Server | Number of reverse proxy hops to trust (`0` locally, `1` on Render) | `0` |
+| `GEOIP_DB_PATH` | Server | Path to local DB-IP City Lite MMDB file | `./data/dbip-city-lite-2026-11.mmdb` |
 
-Never commit a real `.env` file, database credentials, admin credentials, or a GeoIP database. The server loads `server/.env` when started by its workspace script.
+### 4. Generate admin password hash and prepare GeoIP data
 
-## API
+Linkify does not store plain-text passwords. Generate an scrypt password hash using the built-in helper script:
 
-- `POST /api/links` accepts `{ "originalUrl": "https://example.com/path", "customAlias": "optional-name", "title": "optional", "tags": ["optional"], "utm": { "utm_source": "newsletter" } }`. Adaptive links may also include `adaptiveRouting: { "enabled": true, "defaultDestinationUrl": "https://example.com/default", "rules": [{ "ruleId": "mobile-primary", "deviceType": "mobile", "destinationUrl": "https://example.com/mobile", "enabled": true }] }`. Rule array order is priority; IDs may be omitted on create and generated by the server. It returns the final default destination and any UTM field conflicts. Existing UTM values are kept and never overwritten. Alias conflicts return `409` with database-checked suggestions.
-- `GET /api/links?q=...&status=active&tag=...&sort=createdAt&page=1&limit=50` returns `{ "links": [...], "pagination": { "page": 1, "limit": 50, "total": 1, "totalPages": 1 } }`. Search checks title, alias, and destination. Sort can be `createdAt` or `clicks`; limit is capped at 100.
-- `GET /api/links/:id` returns `{ "link": {...} }`; malformed IDs return `400` and unknown links return `404`.
-- `DELETE /api/links/:id` deletes only the matching MongoDB record; malformed IDs return `400` and unknown links return `404`.
-- `PATCH /api/links/:id` edits the destination, title, tags, status (`active` / `archived`), or the complete `adaptiveRouting` object. Submitting its rules array updates/removes/reorders rules as a single atomic document update. Archived short links return `410 Gone` and can be restored by setting status to `active`.
-- `GET /api/links/:id/analytics?from=YYYY-MM-DD&to=YYYY-MM-DD` returns `{ "analytics": { "totalClicks": 12, "clicksToday": 1, "clicksLast7Days": 4, "clicksLast30Days": 9, "dailyClicks": [], "deviceBreakdown": {}, "browserBreakdown": {}, "operatingSystemBreakdown": {}, "destinations": [], "ruleClicks": [], "fallbackClicks": 0, "topReferrers": [], "botBreakdown": {} } }`. Adaptive destination rows identify the matched rule (or `default`) without duplicating destination URLs in click records. Dates use inclusive UTC days; by default the selected window is the last 30 UTC calendar days, and it cannot exceed 366 days.
-- `GET /api/analytics/overview?from=YYYY-MM-DD&to=YYYY-MM-DD` returns selected-range activity, country rankings, optional region counts, top links, and recently created links.
-- `GET /api/aliases/:alias/availability` returns `{ alias, available, suggestions }`.
-- `GET /:code` redirects to the stored destination with HTTP `302`, or returns `404` for an unknown code.
-- `GET /api/health` reports API/database readiness.
+```bash
+npm run hash-admin-password --workspace server
+```
 
-Custom aliases are case-insensitive and stored in lowercase. They must be 3–40 characters and contain lowercase letters, digits, and single hyphens. Reserved aliases include `api`, `admin`, `dashboard`, `login`, `health`, `favicon`, and `robots.txt`. Destination URLs must use HTTP or HTTPS.
+The script prompts for a password and outputs an encoded hash in the format `scrypt$<salt>$<hash>`. Copy that value into `ADMIN_PASSWORD_HASH` in `server/.env`.
 
-Adaptive routing is opt-in and backward compatible: legacy links continue using `originalUrl`, and adaptive links keep that field equal to the configured default destination for existing API consumers. Each rule can combine `deviceType` (`mobile`, `desktop`, or `tablet`), an ISO 3166-1 alpha-2 `countryCode`, `startAt`/`endAt` schedule bounds with an IANA `timeZone`, and a `campaign` object containing any of `source`, `medium`, and `campaign` (matched to `utm_source`, `utm_medium`, and `utm_campaign`). Conditions in one rule use AND logic. Rules run in array priority order; the first enabled match wins, otherwise the default destination is used. Start bounds are inclusive and end bounds exclusive. In API requests, local `YYYY-MM-DDTHH:mm` schedule values are interpreted in `timeZone` and converted to UTC; ISO timestamps with an explicit offset are also accepted. Schedule responses are UTC ISO timestamps. Nonexistent local times during daylight-saving changes are rejected; ambiguous times use the earlier occurrence. UTM values are limited to 100 printable characters and compared exactly, including case. Query parameters are untrusted and never select device type or substitute for the HTTP Referer. Country matching uses the existing trusted local GeoIP lookup; missing or failed lookup means country conditions do not match. Rule destinations are validated as HTTP(S). Click events store the selected destination ID, matched rule ID, and fallback flag, never raw destination URLs, IP addresses, User-Agent strings, or UTM values. Existing links require no data migration; MongoDB stores adaptive configuration inline in existing `links` documents.
+Next, download the local DB-IP City Lite database file for geographic analytics:
 
-The dashboard lists links behind the temporary single-admin staging login and supports search, copy, opening destinations, confirmed deletion, analytics, and QR code PNG downloads. QR codes encode each actual short URL and are rendered at high resolution for PNG export. This staging login is not multi-tenant authentication.
+```bash
+npm run prepare-geoip --workspace server
+```
 
-Click records store only approximate country name, ISO code, city and optional region from a local DB-IP City Lite database. Raw IP addresses and raw User-Agent strings are never persisted. On Render, GeoIP reads the single-address `CF-Connecting-IP` header provided by its Cloudflare edge; it does not use the potentially spoofable `X-Forwarded-For` chain or fall back to the Render proxy address. Invalid, private, reserved, missing, and unresolvable addresses return Unknown. A lookup error does not prevent a redirect, though country rules require a successful lookup. Device/browser classification and bot detection are heuristic estimates. Referrers are reduced to hostnames. Click events expire after 365 days through a MongoDB TTL index; TTL cleanup is asynchronous, so this is an approximate retention window.
+This downloads and verifies the official DB-IP Lite MMDB file into `server/data/`.
 
-The `links` MongoDB collection has a unique index on `shortCode`; duplicate-key races are handled in the API. Link creation and alias availability checks are each limited to 60 requests per 15 minutes per client IP. Link management, alias lookup, dashboard, and analytics APIs require the temporary single-admin staging login. Public short-link redirects and `/api/health` remain open. This is a staging boundary, not final multi-tenant authentication. API tests use in-memory models and do not require a running MongoDB instance.
+### 5. Start the development server
 
-## GeoIP and private staging setup
+Start both the frontend and backend together using the workspace root command:
 
-The server uses the maintained `maxmind` Node package with a local MMDB reader. DB-IP City Lite uses the MaxMind DB v2 format; the application maps `country.iso_code`, `country.names.en`, `city.names.en`, and `subdivisions[0].names.en`. The application never sends visitor IPs to an external lookup service. Locally, set `GEOIP_DB_PATH=./data/dbip-city-lite-2026-11.mmdb` in `server/.env` for the checked-out database. Render builds download the pinned November 2026 release into `server/data/dbip-city-lite.mmdb`; set production `GEOIP_DB_PATH=./data/dbip-city-lite.mmdb`. Relative database paths resolve from the server workspace, regardless of the process launch directory. Production initializes the same reader used by redirect lookups and verifies the sample public IP has country and city data before listening; missing or invalid files stop startup. Lookup diagnostics report only categories and error types, never the IP or full error details. Individual lookup errors still return `Unknown` and never block redirects. The compressed archive and extracted database are excluded from Git.
+```bash
+npm run dev
+```
 
-DB-IP Lite is licensed under CC BY 4.0 and requires attribution when data is used. The geographic dashboard displays the required [IP Geolocation by DB-IP](https://db-ip.com) link. Keep this attribution on any deployed dashboard that displays geographic analytics.
+- **Frontend:** http://localhost:5174
+- **Backend API:** http://localhost:5000
+- **Health check:** http://localhost:5000/api/health
 
-Set `ADMIN_USERNAME` and `ADMIN_PASSWORD_HASH` on the backend. Generate the hash in a terminal with `npm run hash-admin-password --workspace server`; the password is entered without echo. Store only the printed encoded result in the backend secret manager. Its format is `scrypt$<base64url salt>$<base64url digest>` using a 64-byte scrypt digest. Changing the configured username or hash immediately makes existing sessions fail authentication; users must sign in again. The server stores random opaque sessions in MongoDB by token hash, expires them after eight hours, and sets HttpOnly cookies with `SameSite=Lax; Secure` in production. The deployed Vercel app proxies `/api/*` to Render so browser API calls stay same-origin; the cookie remains host-only (no `Domain` attribute). Mutating auth calls require the exact configured frontend Origin. Login is limited to 10 attempts per 15 minutes per client IP. No multi-user registration or billing behavior is included.
+To run them in separate terminal windows:
 
-## Deployment configuration (Vercel frontend + Render API)
+```bash
+# Terminal 1: backend
+npm run dev --workspace server
 
-Vercel serves the frontend at `https://linkify-3jnh.vercel.app` and proxies browser API requests to the Render API at `https://linkify-whvp.onrender.com`. The browser sees same-origin `/api/*` requests, so the existing production `SameSite=Lax; Secure` host-only session cookie works without weakening cookie or Origin protections. The proxy is limited to `/api/*`; generated short URLs continue to use the Render domain.
+# Terminal 2: frontend
+npm run dev --workspace client
+```
 
-### Render Web Service
+## How to use Linkify Flows
 
-- Root Directory: repository root (`.` or leave blank).
-- Runtime: Node.
-- Node.js version: `24.x` (also declared in the root `package.json`).
-- Build Command: `npm ci && npm run prepare-geoip --workspace @linkify/server`.
-- Start Command: `npm start`.
-- Health Check Path: `/api/health`.
-- Keep the Render public service at `https://linkify-whvp.onrender.com` with its managed TLS certificate.
-- Set these service environment variables (secrets are entered directly into Render; do not place their values in Git):
+1. **Log in:** Open the dashboard at http://localhost:5174 and log in with your admin credentials.
+2. **Create a Flow:** Navigate to the **Flows** tab and click **Create Flow**.
+3. **Set the event schedule:** Set the event timezone (e.g. `Asia/Kolkata`) and local start and end times.
+4. **Build the visual graph:**
+   - The canvas displays an Entry node, a Router node, scheduled stage nodes (Before, During, After) and a Fallback node.
+   - Click any destination node to configure its label and target URL.
+5. **Simulate routing:** Open the **Simulator** tab to test where visitors will be redirected at different dates and times.
+6. **Publish:** Click **Publish Flow**. Optionally assign a custom short alias (e.g., `fest2026`). The server atomically creates the short link and saves a publication snapshot.
+7. **Share the link:** Share the generated short link or download its QR code.
+8. **View analytics & history:** Check the **Analytics** tab to monitor click distribution across stages, or inspect past snapshots in the **History** tab and roll back if needed.
 
-| Name | Value / guidance |
-| --- | --- |
-| `NODE_ENV` | `production` |
-| `CLIENT_ORIGIN` | `https://linkify-3jnh.vercel.app` (one exact origin, no trailing slash) |
-| `SHORT_BASE_URL` | `https://linkify-whvp.onrender.com` (keeps public short links directly on Render) |
-| `MONGODB_URI` | Secret Atlas connection string for the intended production database; restrict Atlas network access to the deployment as appropriate. |
-| `ADMIN_USERNAME` | Admin login name. |
-| `ADMIN_PASSWORD_HASH` | Output of `npm run hash-admin-password --workspace server`, generated locally; never store the plaintext password. |
-| `TRUST_PROXY_HOPS` | Keep `1` for the existing Render web-service setup; do not use `true`. GeoIP does not rely on this hop count and reads Render's Cloudflare-provided single-address header instead. |
-| `GEOIP_DB_PATH` | `./data/dbip-city-lite.mmdb` (path is relative to the server workspace at start). |
-| `PORT` | Leave unset; Render supplies this automatically and the server listens on it. |
+## Testing and verification
 
-Generate a password hash locally with `npm run hash-admin-password --workspace server`, then paste only the resulting encoded hash into Render's `ADMIN_PASSWORD_HASH` field. Do not run this command in build logs or put its output in source control.
+The repository includes comprehensive test suites across unit, integration and browser levels:
 
-### Vercel Project
+```bash
+# Run all unit and in-memory integration tests (client and server)
+npm test
 
-- Root Directory: repository root (`.`); keep “Include files outside the root directory” unnecessary because the frontend build is contained in the monorepo root and `client` workspace.
-- Framework Preset: Vite.
-- Node.js Version: `24.x`.
-- Install Command: `npm ci`.
-- Build Command: `npm run build --workspace @linkify/client`.
-- Output Directory: `client/dist`.
-- The root `vercel.mjs` is evaluated at build time. It installs the `/api/:path*` rewrite to `https://linkify-whvp.onrender.com/api/:path*` only when Vercel sets `VERCEL_ENV=production`; Preview, Development and unknown environments receive no rewrite. Production API responses use `Cache-Control: no-store` and Vercel rewrite caching is disabled. This keeps Preview deployments from reaching the production admin API even if they use relative `/api/*` requests.
-- Production API origin: `https://linkify-3jnh.vercel.app`.
-- Set `VITE_API_URL=https://linkify-3jnh.vercel.app` for **Production only**. This is public browser configuration, never a secret. Do not set `VITE_API_URL` for Preview. The Vite build rejects a Preview build that inherits this variable; separately, `vercel.mjs` omits all rewrites unless `VERCEL_ENV` is exactly `production`. Preview requests therefore stay on that Preview deployment and cannot be sent to the production backend by the project rewrite. Keep Vercel's system environment variables enabled so `VERCEL_ENV` is present in the build environment. Verify the Preview deployment's `/api/*` paths do not reach Render before sharing that deployment.
+# Run MongoDB replica-set integration tests (requires local or Atlas replica set)
+node server/scripts/runReplicaSetTests.js
 
-### DB-IP build artifact and updates
+# Run Atlas database schema and index verification
+npm run verify-atlas --workspace server
 
-The Render build runs `server/scripts/downloadDbIpLite.js`, downloads the pinned official release `2026-11`, and checks the downloaded archive's pinned SHA-1 (`21ed2ad1b50b98918c2432b61421dce9e61ed121`) before decompression. It then verifies DB-IP's published SHA-1 for the uncompressed MMDB (`a6f14e8da5565c713cdda9f1959a904b2eb88337`) and opens/queries it with the installed `maxmind` reader before moving it to `server/data/dbip-city-lite.mmdb`. DB-IP publishes its checksum for the uncompressed database, not the `.gz` archive; therefore the published checksum cannot be checked until decompression, while the pinned archive checksum is checked first. A network, decompression, checksum, or MMDB validation failure exits the build unsuccessfully. The direct download is public and needs no credential. To update monthly, change `RELEASE`, both checksums, and URL template together in `server/scripts/downloadDbIpLite.js`, then confirm the dashboard attribution remains present. Do not fetch in a Render pre-deploy command: that command's filesystem is separate from the build artifact. The build output is ignored by Git (`*.mmdb` and `*.mmdb.gz`).
+# Run the full Playwright browser verification suite (desktop and mobile)
+node server/scripts/verifyAndCaptureMilestone4.js
+```
 
-The exact local preparation command is `npm run prepare-geoip --workspace @linkify/server`. A deployment's normal Render build command above runs it automatically before the service starts. Do not configure a Render Secret File or commit the MMDB. A persistent disk is unnecessary for this build-artifact approach.
+To create a production build of the frontend:
 
-Production startup checks that `CLIENT_ORIGIN`, `SHORT_BASE_URL`, `MONGODB_URI`, `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, and `GEOIP_DB_PATH` exist, validates the password-hash format and explicit proxy-hop setting, rejects localhost/non-HTTPS public origins, and opens/queries the MMDB before connecting to MongoDB. `VITE_API_URL` is public browser configuration; Atlas/admin credentials belong only in Render's backend environment.
+```bash
+npm run build
+```
 
-`PORT` is provided by Render. The remaining backend variable names are exactly `NODE_ENV`, `CLIENT_ORIGIN`, `SHORT_BASE_URL`, `MONGODB_URI`, `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `TRUST_PROXY_HOPS`, and `GEOIP_DB_PATH`. Set Vercel `VITE_API_URL` only for Production; leave it unset for Preview.
+To run the backend in production mode:
 
-## Atlas and deployment verification checklist
+```bash
+npm start
+```
 
-The standard `npm test` suite uses in-memory models. For actual Atlas verification, `npm run verify-atlas --workspace server` reads live collection indexes and executes the overview/link analytics pipelines without inserting data. The explicit `-- --exercise` option creates uniquely named temporary test links, events, and a session; checks authenticated APIs, redirect insertion, date-filtered geography, pagination/sorting and archive/restore; then verifies those fixture records are removed.
+## Deployment architecture
 
-Before staging release, verify against the intended Atlas database with the safe exercise and confirm:
+The production application is deployed across three services:
 
-1. Backend connection succeeds without printing the URI.
-2. `links.shortCode` has a unique index.
-3. `clickEvents` has `{ linkId: 1, clickedAt: -1 }` and `{ clickedAt: 1 }` with `expireAfterSeconds: 31536000` indexes.
-4. Geographic aggregation facets (including legacy events without country fields) return country and optional region counts for a selected inclusive UTC date range.
-5. Pagination and date filtering work against actual records; inspect explain plans and server execution for the overview and single-link analytics pipelines.
-6. Health is public, management calls without a session return 401, login works, and logout/expiry invalidate sessions.
-7. Create a short link, visit it, then verify click and approximate geographic analytics. Confirm its QR code resolves to the Render domain.
-8. Verify Vercel browser requests use the production API origin and Render CORS rejects other origins.
+1. **Frontend (Vercel):** Hosted at https://linkify-3jnh.vercel.app.
+   - Built using Vite with Node 24.
+   - The `vercel.mjs` configuration sets up a reverse proxy rewriting `/api/:path*` directly to the backend. This enables same-origin cookies and avoids cross-site cookie restrictions in modern browsers.
+2. **Backend (Render):** Hosted at https://linkify-whvp.onrender.com.
+   - Runs the Express API and handles public short link redirects.
+   - Configured with `TRUST_PROXY_HOPS=1`. GeoIP reads the `CF-Connecting-IP` header provided by Cloudflare.
+   - During build, Render runs `npm run prepare-geoip --workspace @linkify/server` to download and checksum-verify the DB-IP database.
+3. **Database (MongoDB Atlas):**
+   - Cloud-hosted replica set supporting multi-document transactions.
+   - Indexed for high performance on short codes, session TTLs, click event analytics and publication history.
 
-Atlas connectivity, the expected link/click/session indexes, and a cleaned-up integration exercise have been verified in the configured development environment. Production Render/Vercel settings, account access, and deployed domains have not been provided or verified; no deployment is claimed.
+## About the project
+
+I built Linkify as part of my web development fellowship at DeepCytes Cyber Labs. The goal was to build a production-ready, full-stack application from scratch and learn practical software engineering patterns along the way.
+
+Building this project taught me a lot about:
+- Designing clean REST APIs and data schemas.
+- Working with visual node graphs and reactive UI state in React.
+- Implementing atomic operations and concurrency control with MongoDB transactions.
+- Managing timezone conversions and edge cases like daylight saving transitions.
+- Anonymizing analytics data to respect visitor privacy.
+- Setting up same-origin authentication proxies across separate frontend and backend hosting providers.
+- Writing thorough automated tests and maintaining stable baseline checkpoints during iterative development.
+
+## Acknowledgements
+
+- Geographic lookup data provided by [DB-IP](https://db-ip.com/) under the CC BY 4.0 license.
+- Node graph visualization powered by [React Flow](https://reactflow.dev/) (`@xyflow/react`).

@@ -24,6 +24,17 @@ export function compileFlowToAdaptiveRouting(flow, { previousRouting } = {}) {
       ...(stage.endAtUtc ? { endAt: new Date(stage.endAtUtc).toISOString() } : {}),
       timeZone: plain.creatorTimeZone,
       destinationUrl: stage.destinationUrl,
+      ...(stage.experiments?.enabled && Array.isArray(stage.experiments.variants) && stage.experiments.variants.length === 2 ? {
+        experiments: {
+          enabled: true,
+          variants: stage.experiments.variants.map((v) => ({
+            variantId: v.variantId,
+            label: v.label,
+            destinationUrl: v.destinationUrl,
+            weight: v.weight,
+          })),
+        },
+      } : {}),
       enabled: true,
     })),
   };

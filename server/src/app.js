@@ -53,6 +53,7 @@ export function createApp({ linkModel = Link, flowModel = Flow, flowPublicationM
 
   app.use(cors({ origin: (requestOrigin, callback) => callback(null, requestOrigin === clientOrigin), credentials: true }));
   app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
   app.use('/api/health', healthRouter);
   app.get('/api/auth/session', auth.status);
   app.post('/api/auth/login', loginLimit, auth.requireSameOrigin, auth.login);

@@ -1,7 +1,25 @@
 import mongoose from 'mongoose';
 
+const abVariantSchema = new mongoose.Schema({
+  variantId: { type: String, required: true },
+  label: { type: String, required: true, maxlength: 80 },
+  destinationUrl: { type: String, required: true },
+  weight: { type: Number, required: true, min: 1, max: 99 },
+}, { _id: false });
+
 const linkSchema = new mongoose.Schema({
   originalUrl: { type: String, required: true },
+  protection: {
+    enabled: { type: Boolean, default: false },
+    passwordHash: { type: String, default: null },
+    expiresAt: { type: Date, default: null },
+    maxClicks: { type: Number, min: 1, default: null },
+  },
+  lifetimeRedirectCount: { type: Number, default: 0, min: 0 },
+  experiments: {
+    enabled: { type: Boolean, default: false },
+    variants: { type: [abVariantSchema], default: [] },
+  },
   adaptiveRouting: {
     enabled: { type: Boolean, default: false },
     defaultDestinationUrl: { type: String, default: null },
@@ -29,6 +47,10 @@ const linkSchema = new mongoose.Schema({
       },
       destinationUrl: { type: String, required: true },
       destinationId: { type: String, required: true },
+      experiments: {
+        enabled: { type: Boolean, default: false },
+        variants: { type: [abVariantSchema], default: [] },
+      },
       enabled: { type: Boolean, default: true },
     }],
   },

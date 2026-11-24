@@ -1,5 +1,12 @@
 import mongoose from 'mongoose';
 
+const abVariantSchema = new mongoose.Schema({
+  variantId: { type: String, required: true },
+  label: { type: String, required: true, maxlength: 80 },
+  destinationUrl: { type: String, required: true },
+  weight: { type: Number, required: true, min: 1, max: 99 },
+}, { _id: false });
+
 const positionSchema = new mongoose.Schema({ x: Number, y: Number }, { _id: false });
 const presentationNodeSchema = new mongoose.Schema({
   nodeId: { type: String, required: true },
@@ -16,6 +23,10 @@ const stageSchema = new mongoose.Schema({
   nodeId: { type: String, required: true },
   phase: { type: String, enum: ['before', 'during', 'after', 'custom'], required: true },
   destinationUrl: { type: String, default: '' },
+  experiments: {
+    enabled: { type: Boolean, default: false },
+    variants: { type: [abVariantSchema], default: [] },
+  },
   startLocal: { type: String, default: '' }, endLocal: { type: String, default: '' },
   startDisambiguation: { type: String, enum: ['earlier', 'later'], default: 'earlier' },
   endDisambiguation: { type: String, enum: ['earlier', 'later'], default: 'earlier' },
@@ -35,6 +46,12 @@ const flowSchema = new mongoose.Schema({
   draft: {
     presentation: { nodes: { type: [presentationNodeSchema], default: [] }, edges: { type: [edgeSchema], default: [] } },
     routing: { stages: { type: [stageSchema], default: [] }, fallbackNodeId: { type: String, default: null }, fallbackDestinationUrl: { type: String, default: '' } },
+    protection: {
+      enabled: { type: Boolean, default: false },
+      passwordHash: { type: String, default: null },
+      expiresAt: { type: Date, default: null },
+      maxClicks: { type: Number, min: 1, default: null },
+    },
   },
   publishedRevision: { type: Number, default: null },
   publicationSequence: { type: Number, default: 0 },

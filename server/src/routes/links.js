@@ -4,6 +4,7 @@ import { createLinkService, AliasConflictError } from '../services/linkService.j
 import mongoose from 'mongoose';
 import ClickEvent from '../models/ClickEvent.js';
 import { resolveAdaptiveDestination } from '../services/adaptiveRoutingService.js';
+import { sanitizeProtectionForClient } from '../services/linkProtectionService.js';
 
 export function serializeLink(link, baseUrl) {
   const isCustomAlias = link.isCustomAlias ?? !/^[0-9a-zA-Z]{7}$/.test(link.shortCode);
@@ -17,6 +18,17 @@ export function serializeLink(link, baseUrl) {
     shortCode: link.shortCode, shortUrl: `${baseUrl}/${link.shortCode}`,
     isCustomAlias, title: link.title ?? '', tags: link.tags ?? [],
     status: link.status ?? 'active', createdAt: link.createdAt, updatedAt: link.updatedAt ?? null,
+    lifetimeRedirectCount: link.lifetimeRedirectCount ?? 0,
+    protection: sanitizeProtectionForClient(link.protection),
+    experiments: link.experiments ? {
+      enabled: link.experiments.enabled === true,
+      variants: (link.experiments.variants ?? []).map((v) => ({
+        variantId: v.variantId,
+        label: v.label,
+        destinationUrl: v.destinationUrl,
+        weight: v.weight,
+      })),
+    } : { enabled: false, variants: [] },
     management: link.management?.ownerType === 'flow' ? { ownerType: 'flow', flowId: link.management.flowId } : null,
     adaptiveRouting: adaptiveRouting ? {
       enabled: adaptiveRouting.enabled === true,
@@ -183,18 +195,8 @@ export function createLinksRouter({ linkModel = Link, clickEventModel = ClickEve
       const { link, utmConflicts } = await linkService.create(request.body ?? {});
       const baseUrl = (process.env.SHORT_BASE_URL ?? `${request.protocol}://${request.get('host')}`).replace(/\/$/, '');
       response.status(201).json({
-        id: link.id ?? link._id?.toString(),
-        originalUrl: link.originalUrl,
-        shortCode: link.shortCode,
-        shortUrl: `${baseUrl}/${link.shortCode}`,
-        isCustomAlias: link.isCustomAlias ?? Boolean(request.body?.customAlias),
-        title: link.title ?? '',
-        tags: link.tags ?? [],
-        status: link.status ?? 'active',
+        ...serializeLink(link, baseUrl),
         utmConflicts,
-        createdAt: link.createdAt,
-        updatedAt: link.updatedAt ?? null,
-        adaptiveRouting: serializeLink(link, baseUrl).adaptiveRouting,
       });
     } catch (error) {
       if (error instanceof AliasConflictError) {

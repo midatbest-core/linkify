@@ -271,3 +271,47 @@ svg[role="group"]:focus-visible { outline: 2px solid var(--color-brand); outline
 .status-on { color: #1b5322; background: #e4f3de; border: 1px solid #c2e2b9; }
 .status-off { color: #4b584d; background: #eceee6; border: 1px solid #dcdfd5; }
 .status-archived { color: #634f3a; background: #f4eee6; border: 1px solid #dfd4c5; }
+
+/* Campaign Management Modal & Printable Report */
+.campaign-modal-card {
+  scrollbar-width: thin;
+}
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .app-topbar,
+  .app-navigation,
+  .button-primary,
+  .button-secondary,
+  .button-ghost,
+  .nav-pill,
+  header,
+  footer,
+  nav {
+    display: none !important;
+  }
+
+  .campaign-modal-card {
+    position: static !important;
+    inset: auto !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .print-report-container {
+    margin-top: 0 !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+}

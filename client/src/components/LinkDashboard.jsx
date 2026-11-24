@@ -3,6 +3,9 @@ import QrCode from './QrCode.jsx';
 import { DateRange, LinkAnalytics, OverviewAnalytics } from './AnalyticsViews.jsx';
 import AdaptiveRuleEditor, { createAdaptiveRule, prepareAdaptiveRule } from './AdaptiveRuleEditor.jsx';
 import RoutingSimulator from './RoutingSimulator.jsx';
+import ProtectionSettings from './ProtectionSettings.jsx';
+import ExperimentEditor from './ExperimentEditor.jsx';
+import CampaignReportModal from './CampaignReportModal.jsx';
 import { firstInvalidAdaptiveRule, serializeAdaptiveRule } from '../utils/adaptiveRoutingValidation.js';
 import { authenticatedFetch } from '../utils/authenticatedFetch.js';
 import { scheduleDashboardFilters } from '../utils/dashboardFilters.js';
@@ -48,6 +51,7 @@ export default function LinkDashboard({ onCreateLink, onOpenFlow, initialExpande
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState('');
   const [simulatorFor, setSimulatorFor] = useState(null);
+  const [campaignReportId, setCampaignReportId] = useState(null);
 
   useEffect(() => { if (initialExpanded) setExpanded(initialExpanded); }, [initialExpanded]);
 
@@ -131,7 +135,18 @@ export default function LinkDashboard({ onCreateLink, onOpenFlow, initialExpande
   }
   function beginEdit(link) {
     setEditing(link.id);
-    setDraft({ originalUrl: link.originalUrl, title: link.title ?? '', tags: (link.tags ?? []).join(', '), adaptiveRouting: { enabled: link.adaptiveRouting?.enabled === true, defaultDestinationUrl: link.adaptiveRouting?.defaultDestinationUrl ?? link.originalUrl, rules: (link.adaptiveRouting?.rules ?? []).map(prepareAdaptiveRule) } });
+    setDraft({
+      originalUrl: link.originalUrl,
+      title: link.title ?? '',
+      tags: (link.tags ?? []).join(', '),
+      protection: link.protection ? { ...link.protection, password: '' } : { enabled: false, password: '', expiresAt: '', maxClicks: '' },
+      experiments: link.experiments ? { ...link.experiments } : { enabled: false, variants: [] },
+      adaptiveRouting: {
+        enabled: link.adaptiveRouting?.enabled === true,
+        defaultDestinationUrl: link.adaptiveRouting?.defaultDestinationUrl ?? link.originalUrl,
+        rules: (link.adaptiveRouting?.rules ?? []).map(prepareAdaptiveRule),
+      },
+    });
   }
   async function saveEdit(link) {
     setError('');
@@ -142,9 +157,23 @@ export default function LinkDashboard({ onCreateLink, onOpenFlow, initialExpande
     }
     setSavingEdit(true);
     try {
+      const payload = {
+        originalUrl: draft.originalUrl,
+        title: draft.title,
+        tags: draft.tags.split(',').map((value) => value.trim()).filter(Boolean),
+        adaptiveRouting: {
+          ...draft.adaptiveRouting,
+          defaultDestinationUrl: draft.originalUrl,
+          rules: draft.adaptiveRouting.rules.map(serializeAdaptiveRule),
+        },
+      };
+      if (draft.protection) payload.protection = draft.protection;
+      if (draft.experiments) payload.experiments = draft.experiments;
+
       const response = await authenticatedFetch(`${API_URL}/api/links/${encodeURIComponent(link.id)}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ originalUrl: draft.originalUrl, title: draft.title, tags: draft.tags.split(',').map((value) => value.trim()).filter(Boolean), adaptiveRouting: { ...draft.adaptiveRouting, defaultDestinationUrl: draft.originalUrl, rules: draft.adaptiveRouting.rules.map(serializeAdaptiveRule) } }),
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Could not update this link.');
@@ -188,10 +217,16 @@ export default function LinkDashboard({ onCreateLink, onOpenFlow, initialExpande
       : links.length === 0 ? <div className="panel mt-5 border-dashed p-8 text-center sm:p-12"><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-brand-soft text-2xl text-brand" aria-hidden="true">+</span><h3 className="mt-4 text-lg font-semibold">{query || tag || status !== 'all' ? 'No matching links' : 'Your first link is one paste away'}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted">{query || tag || status !== 'all' ? 'Try another search or filter.' : 'Create a short link, choose a custom alias, and start tracking redirect activity.'}</p>{query || tag || status !== 'all' ? <button className="button-secondary mt-4" onClick={() => { setQuery(''); setTag(''); setStatus('all'); }}>Clear filters</button> : <button className="button-primary mt-5" onClick={onCreateLink}>Create your first link</button>}</div>
         : <div aria-label="Links" aria-busy={loading} className="link-list mt-4 space-y-3">{links.map((link) => <article key={link.id} className="link-card panel min-w-0 p-4 sm:p-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-base font-semibold text-[#08160e]">{link.title || link.shortCode}</h3><span className={`rounded-full px-2 py-0.5 text-xs ${link.status === 'archived' ? 'bg-[#f3eee7] text-[#6b5945]' : 'bg-[#e9f5e3] text-[#295f22]'}`}>{link.status === 'archived' ? 'Archived' : 'Active'}</span>{link.management?.ownerType === 'flow' ? <span className="rounded-full bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-strong">Event Flow</span> : link.adaptiveRouting?.enabled && <span className="rounded-full bg-[#e8f2ff] px-2 py-0.5 text-xs font-medium text-[#315c8a]">Adaptive</span>}<span className="text-xs text-[#718071]">{link.clickCount ?? 0} clicks</span></div><a href={link.shortUrl} target="_blank" rel="noreferrer" className="mt-2 block break-all text-sm font-semibold text-[#295f22] underline decoration-[#9dce87] underline-offset-4">{link.shortUrl}</a><p className="mt-2 break-all text-sm text-[#526052]">{link.originalUrl}</p><p className="mt-2 text-xs text-[#718071]">{link.isCustomAlias ? `Custom alias · ${link.shortCode}` : 'Random code'} <span className="mx-1">·</span>{link.createdAt ? new Date(link.createdAt).toLocaleDateString() : 'Date unavailable'}{link.tags?.length ? <span className="ml-2">{link.tags.map((value) => <span key={value} className="mr-1 inline-block rounded bg-[#f1f5ef] px-1.5 py-0.5">{value}</span>)}</span> : null}</p></div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:flex xl:shrink-0"><button onClick={() => copy(link)} className="button-secondary min-h-10 px-3 text-xs">{copied === link.id ? '✓ Copied' : 'Copy'}</button><button onClick={() => setExpanded(expanded === link.id ? null : link.id)} aria-expanded={expanded === link.id} className="button-secondary min-h-10 px-3 text-xs">{expanded === link.id ? 'Hide analytics' : 'Analytics'}</button><button ref={(node) => { if (node) simulatorButtons.current.set(link.id, node); else simulatorButtons.current.delete(link.id); }} onClick={() => setSimulatorFor(simulatorFor === link.id ? null : link.id)} aria-expanded={simulatorFor === link.id} className="button-secondary min-h-10 px-3 text-xs">{simulatorFor === link.id ? 'Hide simulator' : 'Simulate'}</button><details className="link-actions"><summary className="button-secondary min-h-11 cursor-pointer px-3 text-xs">More actions</summary><div className="mt-2 flex flex-wrap gap-2">{link.management?.ownerType === 'flow' ? <><button onClick={() => onOpenFlow?.(link.management.flowId)} className="button-secondary min-h-10 px-3 text-xs">Open Flow</button><span className="self-center text-xs text-muted">Routing, archive, and deletion are managed by the Flow.</span></> : <><button onClick={() => editing === link.id ? setEditing(null) : beginEdit(link)} className="button-secondary min-h-10 px-3 text-xs">{editing === link.id ? 'Cancel edit' : 'Edit'}</button><button onClick={() => toggleArchive(link)} className="button-secondary min-h-10 px-3 text-xs">{link.status === 'archived' ? 'Restore' : 'Archive'}</button><button onClick={() => remove(link)} className="button-danger min-h-10 px-3 text-xs">Delete</button></>}<button onClick={() => setExpanded(expanded === `qr-${link.id}` ? null : `qr-${link.id}`)} className="button-secondary min-h-10 px-3 text-xs">QR code</button></div></details></div>
+            <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-base font-semibold text-[#08160e]">{link.title || link.shortCode}</h3><span className={`rounded-full px-2 py-0.5 text-xs ${link.status === 'archived' ? 'bg-[#f3eee7] text-[#6b5945]' : 'bg-[#e9f5e3] text-[#295f22]'}`}>{link.status === 'archived' ? 'Archived' : 'Active'}</span>{link.management?.ownerType === 'flow' ? <span className="rounded-full bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-strong">Event Flow</span> : link.adaptiveRouting?.enabled && <span className="rounded-full bg-[#e8f2ff] px-2 py-0.5 text-xs font-medium text-[#315c8a]">Adaptive</span>}{link.protection?.enabled && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900" title={link.protection.maxClicks ? `Cap: ${link.lifetimeRedirectCount ?? 0} / ${link.protection.maxClicks}` : 'Access protected'}>🔒 Protected{link.protection.maxClicks ? ` (${link.lifetimeRedirectCount ?? 0}/${link.protection.maxClicks})` : ''}</span>}{link.experiments?.enabled && <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-900">⚗ A/B Test</span>}<span className="text-xs text-[#718071]">{link.clickCount ?? 0} clicks</span></div><a href={link.shortUrl} target="_blank" rel="noreferrer" className="mt-2 block break-all text-sm font-semibold text-[#295f22] underline decoration-[#9dce87] underline-offset-4">{link.shortUrl}</a><p className="mt-2 break-all text-sm text-[#526052]">{link.originalUrl}</p><p className="mt-2 text-xs text-[#718071]">{link.isCustomAlias ? `Custom alias · ${link.shortCode}` : 'Random code'} <span className="mx-1">·</span>{link.createdAt ? new Date(link.createdAt).toLocaleDateString() : 'Date unavailable'}{link.tags?.length ? <span className="ml-2">{link.tags.map((value) => <span key={value} className="mr-1 inline-block rounded bg-[#f1f5ef] px-1.5 py-0.5">{value}</span>)}</span> : null}</p></div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:flex xl:shrink-0"><button onClick={() => copy(link)} className="button-secondary min-h-10 px-3 text-xs">{copied === link.id ? '✓ Copied' : 'Copy'}</button><button onClick={() => setExpanded(expanded === link.id ? null : link.id)} aria-expanded={expanded === link.id} className="button-secondary min-h-10 px-3 text-xs">{expanded === link.id ? 'Hide analytics' : 'Analytics'}</button><button onClick={() => setCampaignReportId(link.id)} className="button-secondary min-h-10 px-3 text-xs">Campaign Report</button><button ref={(node) => { if (node) simulatorButtons.current.set(link.id, node); else simulatorButtons.current.delete(link.id); }} onClick={() => setSimulatorFor(simulatorFor === link.id ? null : link.id)} aria-expanded={simulatorFor === link.id} className="button-secondary min-h-10 px-3 text-xs">{simulatorFor === link.id ? 'Hide simulator' : 'Simulate'}</button><details className="link-actions"><summary className="button-secondary min-h-11 cursor-pointer px-3 text-xs">More actions</summary><div className="mt-2 flex flex-wrap gap-2">{link.management?.ownerType === 'flow' ? <><button onClick={() => onOpenFlow?.(link.management.flowId)} className="button-secondary min-h-10 px-3 text-xs">Open Flow</button><span className="self-center text-xs text-muted">Routing, archive, and deletion are managed by the Flow.</span></> : <><button onClick={() => editing === link.id ? setEditing(null) : beginEdit(link)} className="button-secondary min-h-10 px-3 text-xs">{editing === link.id ? 'Cancel edit' : 'Edit'}</button><button onClick={() => toggleArchive(link)} className="button-secondary min-h-10 px-3 text-xs">{link.status === 'archived' ? 'Restore' : 'Archive'}</button><button onClick={() => remove(link)} className="button-danger min-h-10 px-3 text-xs">Delete</button></>}<button onClick={() => setExpanded(expanded === `qr-${link.id}` ? null : `qr-${link.id}`)} className="button-secondary min-h-10 px-3 text-xs">QR code</button></div></details></div>
           </div>
           {editing === link.id && <div className="mt-4 grid gap-3 rounded-xl bg-[#f8fbf6] p-3 sm:grid-cols-2"><label className="text-xs font-semibold text-[#526052]">Title<input value={draft.title} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} maxLength={120} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm font-normal" /></label><label className="text-xs font-semibold text-[#526052]">Tags, comma separated<input value={draft.tags} onChange={(e) => setDraft((d) => ({ ...d, tags: e.target.value }))} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm font-normal" /></label><label className="text-xs font-semibold text-[#526052] sm:col-span-2">Default destination URL<input type="url" value={draft.originalUrl} onChange={(e) => setDraft((d) => ({ ...d, originalUrl: e.target.value, adaptiveRouting: { ...d.adaptiveRouting, defaultDestinationUrl: e.target.value } }))} className="mt-1 min-h-10 w-full rounded-lg border border-[#dfe8dc] bg-white px-3 text-sm font-normal" /></label>
+            <div className="sm:col-span-2">
+              <ProtectionSettings value={draft.protection} onChange={(p) => setDraft((d) => ({ ...d, protection: p }))} existingHasPassword={link.protection?.hasPassword} />
+            </div>
+            <div className="sm:col-span-2">
+              <ExperimentEditor value={draft.experiments} onChange={(exp) => setDraft((d) => ({ ...d, experiments: exp }))} defaultDestinationUrl={draft.originalUrl} />
+            </div>
             <label className="flex min-h-10 items-center gap-2 text-sm font-semibold sm:col-span-2"><input type="checkbox" checked={draft.adaptiveRouting.enabled} onChange={(e) => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, enabled: e.target.checked } }))} />Enable adaptive routing</label>
             <div className="space-y-2 sm:col-span-2"><div className="flex items-center justify-between gap-2"><div><p className="text-xs font-semibold text-[#526052]">Smart routing rules, top to bottom</p><p className="mt-1 text-xs text-[#718071]">Conditions use AND logic. First match wins; otherwise the default destination is used.</p></div><button type="button" onClick={() => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: [...d.adaptiveRouting.rules, createAdaptiveRule()] } }))} disabled={draft.adaptiveRouting.rules.length >= 20} className="min-h-9 rounded-lg border bg-white px-3 text-xs font-semibold text-[#295f22] disabled:opacity-50">Add rule</button></div>
               {draft.adaptiveRouting.rules.map((rule, index) => <AdaptiveRuleEditor key={rule.ruleId} rule={rule} index={index} count={draft.adaptiveRouting.rules.length} onChange={(value) => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: d.adaptiveRouting.rules.map((row) => row.ruleId === rule.ruleId ? value : row) } }))} onMove={(direction) => setDraft((d) => { const rules = [...d.adaptiveRouting.rules]; [rules[index], rules[index + direction]] = [rules[index + direction], rules[index]]; return { ...d, adaptiveRouting: { ...d.adaptiveRouting, rules } }; })} onRemove={() => setDraft((d) => ({ ...d, adaptiveRouting: { ...d.adaptiveRouting, rules: d.adaptiveRouting.rules.filter((row) => row.ruleId !== rule.ruleId) } }))} />)}
@@ -202,5 +237,6 @@ export default function LinkDashboard({ onCreateLink, onOpenFlow, initialExpande
         </article>)}</div>}
     {pagination.totalPages > 1 && <nav className="mt-5 flex items-center justify-between" aria-label="Link pages"><button disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="min-h-10 rounded-lg border border-[#dce8d6] px-4 text-sm font-semibold text-[#295f22] disabled:opacity-40">Previous</button><span className="text-sm text-[#526052]">Page {page} of {pagination.totalPages}</span><button disabled={page >= pagination.totalPages} onClick={() => setPage((value) => value + 1)} className="min-h-10 rounded-lg border border-[#dce8d6] px-4 text-sm font-semibold text-[#295f22] disabled:opacity-40">Next</button></nav>}
     <p className="mt-6 text-xs leading-5 text-muted">Management actions require an admin session. Analytics are redirect counts, not unique visitors or conversions; device, browser and geographic classifications are estimates.</p>
+    {campaignReportId && <CampaignReportModal linkId={campaignReportId} onClose={() => setCampaignReportId(null)} />}
   </section>;
 }

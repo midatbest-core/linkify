@@ -235,6 +235,14 @@ export function createFlowPublishingService({ Flow, Link, FlowPublication, codeG
             tags: [],
             status: 'active',
             management: { ownerType: 'flow', flowId, publicationNumber: nextSequence },
+            ...(rawFlow.draft?.protection ? {
+              protection: {
+                enabled: Boolean(rawFlow.draft.protection.enabled),
+                passwordHash: rawFlow.draft.protection.passwordHash ?? null,
+                expiresAt: rawFlow.draft.protection.expiresAt ?? null,
+                maxClicks: rawFlow.draft.protection.maxClicks ?? null,
+              },
+            } : {}),
           }], { session });
         } else {
           link = await Link.findOneAndUpdate(
@@ -245,6 +253,14 @@ export function createFlowPublishingService({ Flow, Link, FlowPublication, codeG
               title: rawFlow.eventName,
               status: 'active',
               'management.publicationNumber': nextSequence,
+              ...(rawFlow.draft?.protection ? {
+                protection: {
+                  enabled: Boolean(rawFlow.draft.protection.enabled),
+                  passwordHash: rawFlow.draft.protection.passwordHash ?? null,
+                  expiresAt: rawFlow.draft.protection.expiresAt ?? null,
+                  maxClicks: rawFlow.draft.protection.maxClicks ?? null,
+                },
+              } : {}),
             } },
             { new: true, runValidators: true, session },
           );
@@ -425,6 +441,12 @@ export function createFlowPublishingService({ Flow, Link, FlowPublication, codeG
           FlowPublication ? (await FlowPublication.countDocuments({ flowId })) : 0,
         ) + 1;
 
+        const protectionUpdate = targetSnapshot.protection?.enabled ? {
+          'protection.enabled': true,
+          'protection.expiresAt': targetSnapshot.protection.expiresAt ?? null,
+          'protection.maxClicks': targetSnapshot.protection.maxClicks ?? null,
+        } : (targetSnapshot.protection ? { 'protection.enabled': false } : {});
+
         // Update link routing to match historical configuration
         link = await Link.findOneAndUpdate(
           { _id: link._id, 'management.ownerType': 'flow', 'management.flowId': flowId },
@@ -434,6 +456,7 @@ export function createFlowPublishingService({ Flow, Link, FlowPublication, codeG
             title: rawFlow.eventName,
             status: 'active',
             'management.publicationNumber': nextSequence,
+            ...protectionUpdate,
           } },
           { new: true, runValidators: true, session },
         );

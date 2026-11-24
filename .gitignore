@@ -8,5 +8,6 @@ coverage/
 *.mmdb.gz
 npm-debug.log*
 .DS_Store
+artifacts/
 ux2-*.png
 ux2-real-captures/

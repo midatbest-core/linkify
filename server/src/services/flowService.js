@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isValidTimeZone, resolveLocalDateTime, utcDateTimeToLocal } from '../utils/schedule.js';
 import { normalizeAndValidateUrl } from '../utils/validation.js';
+import { sanitizeProtectionForClient } from './linkProtectionService.js';
 
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 const KINDS = new Set(['entry', 'router', 'destination', 'fallback']);
@@ -70,7 +71,16 @@ function normalizeGraph(graph, timeZone, event) {
         const end = normalizeWallTime(schedule.endLocal, timeZone, schedule.endDisambiguation, `Node ${nodeId} end`);
         const effectiveStart = start.instant ?? (phase === 'during' ? event.startAt : phase === 'after' ? event.endAt : null);
         const effectiveEnd = end.instant ?? (phase === 'before' ? event.startAt : phase === 'during' ? event.endAt : null);
-        stages.push({ nodeId, phase, destinationUrl, startLocal: start.local, endLocal: end.local, startDisambiguation: start.disambiguation, endDisambiguation: end.disambiguation, startAtUtc: effectiveStart, endAtUtc: effectiveEnd });
+        const experiments = data.experiments?.enabled && Array.isArray(data.experiments.variants) && data.experiments.variants.length === 2 ? {
+          enabled: true,
+          variants: data.experiments.variants.map((v) => ({
+            variantId: v.variantId,
+            label: v.label,
+            destinationUrl: v.destinationUrl,
+            weight: v.weight,
+          })),
+        } : undefined;
+        stages.push({ nodeId, phase, destinationUrl, ...(experiments ? { experiments } : {}), startLocal: start.local, endLocal: end.local, startDisambiguation: start.disambiguation, endDisambiguation: end.disambiguation, startAtUtc: effectiveStart, endAtUtc: effectiveEnd });
       }
     }
   }
@@ -131,11 +141,18 @@ export function normalizeFlowPayload(input = {}, existing) {
   const eventEnd = normalizeWallTime(input.eventEndLocal ?? existing?.eventEndLocal, timeZone, input.eventEndDisambiguation ?? existing?.eventEndDisambiguation, 'Event end');
   const event = { startAt: eventStart.instant, endAt: eventEnd.instant };
   const graph = input.graph ?? (existing ? serializeFlow(existing).graph : { nodes: [], edges: [] });
+  const draftProtection = input.protection ? {
+    enabled: Boolean(input.protection.enabled),
+    passwordHash: input.protection.passwordHash ?? null,
+    expiresAt: input.protection.expiresAt ? new Date(input.protection.expiresAt) : null,
+    maxClicks: input.protection.maxClicks ? Number(input.protection.maxClicks) : null,
+  } : (existing?.draft?.protection ?? { enabled: false, passwordHash: null, expiresAt: null, maxClicks: null });
   const value = {
     eventName: cleanText(input.eventName ?? existing?.eventName, 'Event name', 120, 'Untitled event flow') || 'Untitled event flow',
     description: cleanText(input.description ?? existing?.description, 'Description', 1000), creatorTimeZone: timeZone,
     eventStartLocal: eventStart.local, eventEndLocal: eventEnd.local, eventStartDisambiguation: eventStart.disambiguation, eventEndDisambiguation: eventEnd.disambiguation,
-    eventStartAtUtc: eventStart.instant, eventEndAtUtc: eventEnd.instant, draft: normalizeGraph(graph, timeZone, event),
+    eventStartAtUtc: eventStart.instant, eventEndAtUtc: eventEnd.instant,
+    draft: { ...normalizeGraph(graph, timeZone, event), protection: draftProtection },
   };
   return { value, validation: validateNormalized(value) };
 }
@@ -145,10 +162,47 @@ export function serializeFlow(flow) {
   const routing = new Map((plain.draft?.routing?.stages ?? []).map((stage) => [stage.nodeId, stage]));
   const nodes = (plain.draft?.presentation?.nodes ?? []).map((node) => {
     const stage = routing.get(node.nodeId); const isFallback = node.kind === 'fallback';
-    return { id: node.nodeId, type: 'flowNode', position: node.position, data: { kind: node.kind, label: node.label, description: node.description, ...(node.phase ? { phase: node.phase } : {}), ...((stage || isFallback) ? { destinationUrl: stage?.destinationUrl ?? plain.draft.routing.fallbackDestinationUrl ?? '' } : {}), ...(stage ? { schedule: { startLocal: stage.startLocal ?? '', endLocal: stage.endLocal ?? '', startDisambiguation: stage.startDisambiguation ?? 'earlier', endDisambiguation: stage.endDisambiguation ?? 'earlier', startAtUtc: stage.startAtUtc ?? null, endAtUtc: stage.endAtUtc ?? null } } : {}) } };
+    return {
+      id: node.nodeId,
+      type: 'flowNode',
+      position: node.position,
+      data: {
+        kind: node.kind,
+        label: node.label,
+        description: node.description,
+        ...(node.phase ? { phase: node.phase } : {}),
+        ...((stage || isFallback) ? { destinationUrl: stage?.destinationUrl ?? plain.draft.routing.fallbackDestinationUrl ?? '' } : {}),
+        ...(stage?.experiments ? { experiments: stage.experiments } : {}),
+        ...(stage ? { schedule: { startLocal: stage.startLocal ?? '', endLocal: stage.endLocal ?? '', startDisambiguation: stage.startDisambiguation ?? 'earlier', endDisambiguation: stage.endDisambiguation ?? 'earlier', startAtUtc: stage.startAtUtc ?? null, endAtUtc: stage.endAtUtc ?? null } } : {}),
+      },
+    };
   });
   const edges = (plain.draft?.presentation?.edges ?? []).map((edge) => ({ id: edge.edgeId, source: edge.source, target: edge.target, label: edge.label, type: 'smoothstep', data: { conditionLabel: edge.label } }));
-  const base = { id: plain.flowId, flowId: plain.flowId, eventName: plain.eventName, description: plain.description ?? '', creatorTimeZone: plain.creatorTimeZone, eventStartLocal: plain.eventStartLocal ?? '', eventEndLocal: plain.eventEndLocal ?? '', eventStartDisambiguation: plain.eventStartDisambiguation ?? 'earlier', eventEndDisambiguation: plain.eventEndDisambiguation ?? 'earlier', eventStartAtUtc: plain.eventStartAtUtc ?? null, eventEndAtUtc: plain.eventEndAtUtc ?? null, revision: plain.revision, publishedRevision: plain.publishedRevision ?? null, publicationSequence: plain.publicationSequence ?? 0, publishedAt: plain.publishedAt ?? null, lifecycleStatus: plain.lifecycleStatus ?? 'active', lifecycleChangedAt: plain.lifecycleChangedAt ?? null, operationVersion: plain.operationVersion ?? 0, linkId: plain.linkId ?? null, graph: { nodes, edges }, createdAt: plain.createdAt, updatedAt: plain.updatedAt };
+  const base = {
+    id: plain.flowId,
+    flowId: plain.flowId,
+    eventName: plain.eventName,
+    description: plain.description ?? '',
+    creatorTimeZone: plain.creatorTimeZone,
+    eventStartLocal: plain.eventStartLocal ?? '',
+    eventEndLocal: plain.eventEndLocal ?? '',
+    eventStartDisambiguation: plain.eventStartDisambiguation ?? 'earlier',
+    eventEndDisambiguation: plain.eventEndDisambiguation ?? 'earlier',
+    eventStartAtUtc: plain.eventStartAtUtc ?? null,
+    eventEndAtUtc: plain.eventEndAtUtc ?? null,
+    revision: plain.revision,
+    publishedRevision: plain.publishedRevision ?? null,
+    publicationSequence: plain.publicationSequence ?? 0,
+    publishedAt: plain.publishedAt ?? null,
+    lifecycleStatus: plain.lifecycleStatus ?? 'active',
+    lifecycleChangedAt: plain.lifecycleChangedAt ?? null,
+    operationVersion: plain.operationVersion ?? 0,
+    linkId: plain.linkId ?? null,
+    graph: { nodes, edges },
+    protection: sanitizeProtectionForClient(plain.draft?.protection),
+    createdAt: plain.createdAt,
+    updatedAt: plain.updatedAt,
+  };
   return base;
 }
 

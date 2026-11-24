@@ -17,6 +17,18 @@ const clickEventSchema = new mongoose.Schema({
   selectedDestinationId: { type: String, default: 'default' },
   matchedRuleId: { type: String, default: null },
   usedFallback: { type: Boolean, default: true },
+  accessStatus: {
+    type: String,
+    enum: ['allowed', 'blocked_expired', 'blocked_max_clicks', 'blocked_password'],
+    default: 'allowed',
+    index: true,
+  },
+  experiment: {
+    _id: false,
+    stageId: { type: String, default: null },
+    variantId: { type: String, default: null },
+    variantLabel: { type: String, default: null },
+  },
 }, { collection: 'clickEvents', versionKey: false });
 
 clickEventSchema.index({ linkId: 1, clickedAt: -1 });

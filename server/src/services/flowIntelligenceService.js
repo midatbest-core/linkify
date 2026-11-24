@@ -54,6 +54,12 @@ export function publicationSnapshot(flow, adaptiveRouting, { publicationNumber, 
       destinationId: adaptiveRouting.defaultDestinationId ?? 'default',
       destinationUrl: adaptiveRouting.defaultDestinationUrl,
     },
+    protection: raw.draft?.protection?.enabled ? {
+      enabled: true,
+      hasPassword: Boolean(raw.draft.protection.passwordHash),
+      expiresAt: raw.draft.protection.expiresAt ?? null,
+      maxClicks: raw.draft.protection.maxClicks ?? null,
+    } : { enabled: false, hasPassword: false, expiresAt: null, maxClicks: null },
     adaptiveRouting: plain(adaptiveRouting),
   };
 }

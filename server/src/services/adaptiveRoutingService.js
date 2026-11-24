@@ -90,6 +90,17 @@ export function normalizeAdaptiveRouting(input, { defaultDestinationUrl, previou
       ...(timeZone ? { timeZone } : {}),
       ...(campaign.value ? { campaign: campaign.value } : {}),
       destinationUrl: destination.value, destinationId, enabled: rule.enabled,
+      ...(rule.experiments?.enabled && Array.isArray(rule.experiments.variants) && rule.experiments.variants.length === 2 ? {
+        experiments: {
+          enabled: true,
+          variants: rule.experiments.variants.map((v) => ({
+            variantId: v.variantId,
+            label: v.label,
+            destinationUrl: v.destinationUrl,
+            weight: v.weight,
+          })),
+        },
+      } : {}),
     });
   }
   return { value: { enabled: input.enabled, defaultDestinationUrl: defaultResult.value, defaultDestinationId, destinations: history, rules: normalizedRules } };
@@ -101,7 +112,15 @@ export function resolveAdaptiveDestination(link, context = 'unknown') {
   const config = rawConfig?.toObject?.() ?? rawConfig;
   const legacyDefault = normalizeAndValidateUrl(link?.originalUrl);
   const safeDefault = legacyDefault.error ? null : link.originalUrl;
-  if (!config?.enabled) return { destinationUrl: safeDefault, selectedDestinationId: 'default', matchedRuleId: null, usedFallback: true };
+  if (!config?.enabled) {
+    return {
+      destinationUrl: safeDefault,
+      selectedDestinationId: 'default',
+      matchedRuleId: null,
+      experiments: link?.experiments,
+      usedFallback: true,
+    };
+  }
   const match = [...(Array.isArray(config.rules) ? config.rules : [])]
     .filter((rule) => {
       if (rule?.enabled !== true || (rule.deviceType && (!DEVICES.has(rule.deviceType) || rule.deviceType !== deviceType))) return false;
@@ -130,8 +149,22 @@ export function resolveAdaptiveDestination(link, context = 'unknown') {
       return !normalizeAndValidateUrl(rule.destinationUrl).error;
     })
     .sort((a, b) => (Number.isInteger(a.priority) ? a.priority : 0) - (Number.isInteger(b.priority) ? b.priority : 0))[0];
-  if (match) return { destinationUrl: match.destinationUrl, selectedDestinationId: match.destinationId ?? `rule:${match.ruleId}`, matchedRuleId: match.ruleId, usedFallback: false };
+  if (match) {
+    return {
+      destinationUrl: match.destinationUrl,
+      selectedDestinationId: match.destinationId ?? `rule:${match.ruleId}`,
+      matchedRuleId: match.ruleId,
+      ...(match.experiments ? { experiments: match.experiments } : {}),
+      usedFallback: false,
+    };
+  }
   const defaultDestination = typeof config.defaultDestinationUrl === 'string' ? config.defaultDestinationUrl : link.originalUrl;
   const validatedDefault = normalizeAndValidateUrl(defaultDestination);
-  return { destinationUrl: validatedDefault.error ? safeDefault : defaultDestination, selectedDestinationId: config.defaultDestinationId ?? 'default', matchedRuleId: null, usedFallback: true };
+  return {
+    destinationUrl: validatedDefault.error ? safeDefault : defaultDestination,
+    selectedDestinationId: config.defaultDestinationId ?? 'default',
+    matchedRuleId: null,
+    ...(link?.experiments ? { experiments: link.experiments } : {}),
+    usedFallback: true,
+  };
 }

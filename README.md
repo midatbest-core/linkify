@@ -29,6 +29,18 @@ The short URL and printed QR code stay exactly the same. No one has to reprint p
   - Country (approximate lookup via local DB-IP City Lite database)
   - Time schedules with timezone awareness
   - Campaign UTM parameters (`utm_source`, `utm_medium`, `utm_campaign`)
+- **Link protection and access limits:** Protect links with granular access controls:
+  - **Password protection:** Visitors must enter a password on a clean unlock page. Passwords are hashed with `scrypt`, and unlocked sessions use signed HMAC-SHA256 cookies that automatically invalidate if the password is changed. A built-in rate limiter (5 attempts per 15 minutes) prevents brute-force guessing.
+  - **Expiration dates:** Set a date and time after which the link automatically expires and returns an HTTP 410 Gone response.
+  - **Click limits:** Set a maximum number of successful redirects (`maxClicks`). An atomic counter ensures the link closes precisely when the cap is reached, without race conditions.
+- **Weighted A/B traffic experimentation:** Split visitor traffic between two destinations (Variant A and Variant B) using percentage weights that sum to 100%. Sticky visitor cookies (24-hour duration) keep repeat visitors on the same variant. Works with standard links, adaptive rules and Linkify Flow stages.
+- **Campaign analytics reports and CSV exports:** Dedicated campaign modal for each link showing:
+  - Lifetime redirect counters and visual cap progress bars.
+  - Traffic access breakdown (allowed visits vs blocked expired, cap reached or password challenge attempts). Blocked visits never inflate successful click metrics.
+  - A/B experiment conversion rates, click counts and percentage splits.
+  - Demographic breakdowns across devices, operating systems, browsers and top countries.
+  - Clean printable report layout for sharing or saving as PDF (`@media print`).
+  - Direct RFC 4180 CSV export protected against spreadsheet formula injection.
 - **Linkify Flows (Event-driven visual workflows):**
   - Interactive canvas built with React Flow (`@xyflow/react`) to connect entry points, routers, time-based stages and fallback destinations.
   - Event schedule configuration with timezone support and automatic handling of daylight saving time transitions.
@@ -76,7 +88,10 @@ linkify/
 │   │   │   ├── FlowAnalytics.jsx    # Flow-level analytics breakdown
 │   │   │   ├── FlowHistory.jsx      # Snapshot history and rollback UI
 │   │   │   ├── LinkDashboard.jsx    # Link list, search, filters and metrics
-│   │   │   ├── AdaptiveRuleEditor.jsx # Rule builder for adaptive links
+│   │   │   ├── CampaignReportModal.jsx # Campaign report, print layout and CSV export
+│   │   │   ├── ProtectionSettings.jsx  # Password, expiration and max click controls
+│   │   │   ├── ExperimentEditor.jsx    # 2-variant A/B traffic split editor
+│   │   │   ├── AdaptiveRuleEditor.jsx  # Rule builder for adaptive links
 │   │   │   └── QrCode.jsx           # QR code preview and PNG export
 │   │   ├── pages/
 │   │   │   └── App.jsx          # Main application page and auth state
@@ -92,8 +107,9 @@ linkify/
 │   │   ├── middleware/          # Admin authentication, cookies and CORS checks
 │   │   ├── models/              # Mongoose schemas (Link, Flow, ClickEvent, etc.)
 │   │   ├── routes/              # API endpoints and public redirect handler
-│   │   ├── services/            # Business logic (flow publishing, intelligence, analytics)
-│   │   ├── utils/               # Timezone math, click classification, normalization
+│   │   ├── services/            # Business logic (publishing, protection, experiments)
+│   │   ├── utils/               # Timezone math, CSV serialization, click classification
+│   │   ├── views/               # HTML challenge pages (unlock form)
 │   │   ├── app.js               # Express application and route registration
 │   │   └── index.js             # Server startup and environment validation
 │   ├── scripts/                 # Maintenance, password hashing and testing scripts
@@ -107,15 +123,19 @@ linkify/
 
 ## How the backend works
 
-The frontend communicates with the Express backend over JSON endpoints. The backend handles request validation, authentication, link resolution, routing evaluation and database updates.
+The frontend communicates with the Express backend over JSON endpoints. The backend handles request validation, authentication, link resolution, access protection, routing evaluation, experiment assignment and database updates.
 
 When a visitor opens a shortened URL:
 1. The backend extracts the short code and looks up the active link record in MongoDB.
 2. If the link is archived, the server returns an HTTP 410 Gone response.
-3. If the link is active and uses adaptive routing or a flow, the server checks the visitor context (device, country, simulated or current timestamp, and UTM parameters) against the configured rules.
-4. The server selects the matching stage destination, or falls back to the default URL if no rules match.
-5. The visitor receives an immediate HTTP 302 redirect to the destination URL.
-6. The click event is asynchronously recorded with anonymized metadata (device, browser, operating system, referrer hostname, approximate country and city).
+3. If access protection is enabled on the link:
+   - **Expiration check:** If an expiration date is configured and has passed, the server returns HTTP 410 Gone.
+   - **Redirect limit check:** If a maximum redirect limit (`maxClicks`) is configured, MongoDB atomically verifies and increments the lifetime redirect counter. If the limit has been reached, the server returns HTTP 410 Gone.
+   - **Password protection:** If a password is required, the server validates the visitor's signed HMAC cookie. If missing or invalid, the server renders the dark-themed unlock challenge page (`/:code/unlock`).
+4. If the link uses adaptive routing or a flow, the server checks the visitor context (device, country, schedule and UTM parameters) against the configured rules to determine the target destination.
+5. If the chosen destination has an active A/B experiment, the server checks for an existing sticky variant cookie (`linkify_ab_<shortCode>_<stageId>`). If none exists, it randomly assigns Variant A or Variant B according to the configured percentage weights and sets the cookie for 24 hours.
+6. The visitor receives an immediate HTTP 302 redirect to the resolved destination URL.
+7. An anonymized click event is recorded asynchronously in MongoDB, capturing access status (`allowed` or `blocked_*`), experiment variant assignment, device, browser, OS, referrer and approximate location.
 
 ```mermaid
 flowchart TD
@@ -124,15 +144,23 @@ flowchart TD
     C --> D{"Link status?"}
     D -->|"Archived"| E["HTTP 410 Gone"]
     D -->|"Not found"| F["HTTP 404 Not Found"]
-    D -->|"Active"| G{"Adaptive or Flow routing?"}
-    G -->|"Standard link"| H["Select original URL"]
-    G -->|"Rules configured"| I["Evaluate conditions in priority order"]
-    I -->|"Rule matched"| J["Select rule destination"]
-    I -->|"No match"| K["Select fallback destination"]
-    H --> L["HTTP 302 Redirect"]
-    J --> L
-    K --> L
-    L --> M["Record anonymized click analytics in MongoDB"]
+    D -->|"Active"| G{"Access protection?"}
+    G -->|"Expired"| H["HTTP 410 Expired"]
+    G -->|"Max clicks reached"| I["HTTP 410 Cap Exceeded"]
+    G -->|"Password needed"| J["Render unlock page"]
+    G -->|"Allowed"| K{"Adaptive or Flow routing?"}
+    K -->|"Standard link"| L["Select original URL"]
+    K -->|"Rules configured"| M["Evaluate conditions in priority order"]
+    M -->|"Rule matched"| N["Select rule destination"]
+    M -->|"No match"| O["Select fallback destination"]
+    L --> P{"A/B experiment?"}
+    N --> P
+    O --> P
+    P -->|"Variants configured"| Q["Select Variant A or B (sticky cookie)"]
+    P -->|"No experiment"| R["Keep selected destination"]
+    Q --> S["HTTP 302 Redirect"]
+    R --> S
+    S --> T["Record anonymized click analytics in MongoDB"]
 ```
 
 ### Main backend services
@@ -143,16 +171,19 @@ flowchart TD
 | Flow service | `flowService.js` | Handles flow creation, draft revisions, validation and listing |
 | Flow publishing | `flowPublishingService.js` | Executes atomic publish, rollback, archive and restore in MongoDB transactions |
 | Flow intelligence | `flowIntelligenceService.js` | Powers routing simulation, publication history pagination and destination analytics |
+| Link protection | `linkProtectionService.js` | Enforces scrypt password hashing, signed cookies, expiration dates and rate limits |
+| Experiment service | `experimentService.js` | Validates 2-variant A/B experiments and handles sticky cookie assignment |
 | Adaptive routing | `adaptiveRoutingService.js` | Evaluates device, country, schedule and UTM conditions on incoming clicks |
 | Link service | `linkService.js` | Generates short codes, validates aliases and suggests alternatives |
-| Analytics service | `analyticsService.js` | Aggregates daily trends, device shares, referrers and geographic rankings |
+| Analytics service | `analyticsService.js` | Aggregates daily trends, device shares, referrers, geographic rankings and campaign reports |
+| CSV export utility | `csvExport.js` | Formats campaign report data as RFC 4180 CSV with formula injection defense |
 | GeoIP service | `geoIpService.js` | Maps IP addresses to approximate city and country using the local MMDB file |
 
 ### Database models
 
-- **Link (`Link.js`):** Stores the short code, default destination URL, title, tags, status (`active` or `archived`), click counter and any inline adaptive routing rules. Has a unique index on `shortCode`.
-- **ClickEvent (`ClickEvent.js`):** Stores anonymized click metadata, matched destination ID and timestamps. Uses a compound index `{ linkId: 1, clickedAt: -1 }` for fast analytics and a TTL index on `clickedAt` that expires documents after 365 days.
-- **Flow (`Flow.js`):** Stores the event name, creator timezone, event schedule, visual draft graph (`nodes` and `edges`), current draft revision, active publication sequence and active published snapshot.
+- **Link (`Link.js`):** Stores the short code, default destination URL, title, tags, status (`active` or `archived`), click counter, lifetime redirect count, access protection settings (`passwordHash`, `expiresAt`, `maxClicks`), and A/B experiments. Has a unique index on `shortCode`.
+- **ClickEvent (`ClickEvent.js`):** Stores anonymized click metadata, matched destination ID, access status (`allowed`, `blocked_expired`, `blocked_max_clicks`, `blocked_password`), A/B experiment assignment, and timestamps. Uses a compound index `{ linkId: 1, clickedAt: -1 }` for fast analytics and a TTL index on `clickedAt` that expires documents after 365 days.
+- **Flow (`Flow.js`):** Stores the event name, creator timezone, event schedule, visual draft graph (`nodes` and `edges`), draft protection settings, current draft revision, active publication sequence and active published snapshot.
 - **FlowPublication (`FlowPublication.js`):** Dedicated collection storing immutable historical snapshots of published flows. Indexed with a unique compound index `{ flowId: 1, publicationNumber: -1 }`.
 - **AdminSession (`AdminSession.js`):** Stores hashed session tokens with credential versions and an automatic TTL expiry index (8 hours).
 
@@ -164,7 +195,8 @@ Flow publication and rollback use MongoDB multi-document transactions to ensure 
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| GET | `/:code` | Redirects to destination URL (HTTP 302) or returns 410 if archived |
+| GET | `/:code` | Redirects to destination URL (HTTP 302), renders password unlock page, or returns 410 if archived/expired/capped |
+| POST | `/:code/unlock` | Validates password submission and issues a signed unlock cookie |
 | GET | `/api/health` | Service and database readiness probe |
 
 #### Authentication
@@ -179,19 +211,21 @@ Flow publication and rollback use MongoDB multi-document transactions to ensure 
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| POST | `/api/links` | Create a short link or adaptive link |
+| POST | `/api/links` | Create a short link, adaptive link, protected link or A/B experiment |
 | GET | `/api/links` | List links with pagination, search query, status and tag filters |
-| GET | `/api/links/:id` | Get link details and configuration |
-| PATCH | `/api/links/:id` | Update link destination, adaptive rules, tags, title or status |
+| GET | `/api/links/:id` | Get link details, protection status and experiment configuration |
+| PATCH | `/api/links/:id` | Update link destination, adaptive rules, protection, experiments, tags, title or status |
 | DELETE | `/api/links/:id` | Delete a standalone link |
 | GET | `/api/aliases/:alias/availability` | Check if an alias is available and get suggestions if taken |
 
-#### Analytics (requires admin session)
+#### Analytics and reports (requires admin session)
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | GET | `/api/analytics/overview` | Overall dashboard metrics, trends, top links and countries |
 | GET | `/api/links/:id/analytics` | Detailed analytics for an individual link over a date range |
+| GET | `/api/links/:id/campaign-report` | Full campaign report with access breakdown, cap progress and A/B split metrics |
+| GET | `/api/links/:id/campaign-report/export` | Download campaign report as an RFC 4180 CSV file |
 
 #### Linkify Flows (requires admin session)
 

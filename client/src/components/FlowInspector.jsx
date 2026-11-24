@@ -1,4 +1,6 @@
 import { FLOW_NODE_TYPES, durationLabel } from '../utils/flowDraft.js';
+import ProtectionSettings from './ProtectionSettings.jsx';
+import ExperimentEditor from './ExperimentEditor.jsx';
 
 const TIME_ZONES = ['UTC', ...(Intl.supportedValuesOf?.('timeZone') ?? [])].filter((zone, index, values) => values.indexOf(zone) === index);
 
@@ -22,6 +24,15 @@ export default function FlowInspector({ draft, selectedNode, selectedEdge, onDra
         <p className="eyebrow">{selectedNode.data.eyebrow}</p>
         <Field label="Node label"><input className="field-control" value={selectedNode.data.label} maxLength={80} onChange={(event) => onNodeChange({ label: event.target.value })} /></Field>
         {[FLOW_NODE_TYPES.DESTINATION, FLOW_NODE_TYPES.FALLBACK].includes(selectedNode.data.kind) && <Field label="Destination URL" hint="Draft only. Use a complete http:// or https:// URL."><input className="field-control" type="url" inputMode="url" placeholder="https://example.com/event" value={selectedNode.data.destinationUrl ?? ''} onChange={(event) => onNodeChange({ destinationUrl: event.target.value })} /></Field>}
+        {selectedNode.data.kind === FLOW_NODE_TYPES.DESTINATION && (
+          <div className="mt-3">
+            <ExperimentEditor
+              value={selectedNode.data.experiments ?? { enabled: false, variants: [] }}
+              onChange={(exp) => onNodeChange({ experiments: exp })}
+              defaultDestinationUrl={selectedNode.data.destinationUrl}
+            />
+          </div>
+        )}
         {schedule && <>
           <Field label="Start date and time" hint="Leave blank to use the phase default."><input className="field-control" type="datetime-local" value={schedule.startLocal} onChange={(event) => onNodeChange({ schedule: { ...schedule, startLocal: event.target.value, startAtUtc: null } })} /></Field>
           <Field label="End date and time" hint="Leave blank to use the phase default."><input className="field-control" type="datetime-local" value={schedule.endLocal} onChange={(event) => onNodeChange({ schedule: { ...schedule, endLocal: event.target.value, endAtUtc: null } })} /></Field>
@@ -31,6 +42,14 @@ export default function FlowInspector({ draft, selectedNode, selectedEdge, onDra
         </>}
       </div>}
       {selectedEdge && <div className="flow-inspector__section"><p className="eyebrow">CONDITION</p><p className="rounded-xl border border-line bg-white p-3 text-sm font-semibold">{selectedEdge.data?.conditionLabel ?? selectedEdge.label}</p><p className="text-xs leading-5 text-muted">Directional routing outcome. Connections are limited to Entry → Decision → Destination and cycles are rejected.</p></div>}
+      {!selectedNode && !selectedEdge && (
+        <div className="flow-inspector__section">
+          <ProtectionSettings
+            value={draft.protection ?? { enabled: false }}
+            onChange={(prot) => onDraftChange({ protection: prot })}
+          />
+        </div>
+      )}
       {!selectedNode && !selectedEdge && <p className="rounded-xl border border-dashed border-line p-4 text-sm leading-6 text-muted">Select a node or connection to edit its draft details.</p>}
     </div>
   </aside>;

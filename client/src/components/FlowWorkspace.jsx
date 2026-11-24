@@ -13,7 +13,16 @@ import { flowApi } from '../utils/flowApi.js';
 import { changeDraftTimeZone, createEventLifecycleGraph, createFlowDraft, isSupportedFlowConnection } from '../utils/flowDraft.js';
 
 const nodeTypes = { flowNode: FlowNode };
-function hydrateFlow(flow) { return flow?.graph ? { ...flow, nodes: flow.graph.nodes, edges: flow.graph.edges } : flow; }
+function hydrateFlow(flow) {
+  return flow?.graph
+    ? {
+        ...flow,
+        nodes: flow.graph.nodes,
+        edges: flow.graph.edges,
+        protection: flow.draft?.protection ?? flow.protection ?? { enabled: false, password: '', expiresAt: '', maxClicks: '' },
+      }
+    : flow;
+}
 function payloadFor(draft, nodes, edges) {
   return {
     eventName: draft.eventName,
@@ -23,6 +32,7 @@ function payloadFor(draft, nodes, edges) {
     eventEndLocal: draft.eventEndLocal,
     eventStartDisambiguation: draft.eventStartDisambiguation,
     eventEndDisambiguation: draft.eventEndDisambiguation,
+    ...(draft.protection ? { protection: draft.protection } : {}),
     ...(draft.revision ? { revision: draft.revision } : {}),
     graph: { nodes, edges },
   };

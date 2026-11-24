@@ -2,6 +2,8 @@ import { randomInt } from 'node:crypto';
 import { normalizeAndValidateAlias, normalizeAndValidateUrl } from '../utils/validation.js';
 import { appendUtmParameters } from '../utils/utm.js';
 import { normalizeAdaptiveRouting } from './adaptiveRoutingService.js';
+import { normalizeAndValidateProtection } from './linkProtectionService.js';
+import { normalizeAndValidateExperiments } from './experimentService.js';
 
 const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const RANDOM_CODE_LENGTH = 7;
@@ -46,7 +48,7 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
     return suggestions;
   }
 
-  async function create({ originalUrl: suppliedOriginalUrl, customAlias, utm, title, tags, adaptiveRouting }) {
+  async function create({ originalUrl: suppliedOriginalUrl, customAlias, utm, title, tags, adaptiveRouting, protection, experiments }) {
     const originalUrl = suppliedOriginalUrl ?? adaptiveRouting?.defaultDestinationUrl;
     const destination = normalizeAndValidateUrl(originalUrl);
     if (destination.error) throw Object.assign(new Error(destination.error), { status: 400 });
@@ -57,13 +59,23 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
     const metadata = normalizeLinkMetadata({ title, tags });
     if (metadata.error) throw Object.assign(new Error(metadata.error), { status: 400 });
 
+    const protectionResult = await normalizeAndValidateProtection(protection);
+    if (protectionResult.error) throw Object.assign(new Error(protectionResult.error), { status: 400 });
+    const experimentResult = normalizeAndValidateExperiments(experiments);
+    if (experimentResult.error) throw Object.assign(new Error(experimentResult.error), { status: 400 });
+
+    const extraFields = {
+      ...(protectionResult.value ? { protection: protectionResult.value } : {}),
+      ...(experimentResult.value ? { experiments: experimentResult.value } : {}),
+    };
+
     let shortCode;
     if (customAlias !== undefined && customAlias !== null && customAlias !== '') {
       const alias = normalizeAndValidateAlias(customAlias);
       if (alias.error) throw Object.assign(new Error(alias.error), { status: 400 });
       shortCode = alias.value;
       try {
-        return { link: await Link.create({ originalUrl: finalUrl, shortCode, isCustomAlias: true, ...(routing ? { adaptiveRouting: { ...routing, defaultDestinationUrl: finalUrl } } : {}), ...metadata }), utmConflicts };
+        return { link: await Link.create({ originalUrl: finalUrl, shortCode, isCustomAlias: true, ...(routing ? { adaptiveRouting: { ...routing, defaultDestinationUrl: finalUrl } } : {}), ...extraFields, ...metadata }), utmConflicts };
       } catch (error) {
         if (error?.code !== 11000) throw error;
         throw new AliasConflictError(shortCode, await suggestAliases(shortCode));
@@ -73,7 +85,7 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
     for (let attempt = 0; attempt < RANDOM_CODE_ATTEMPTS; attempt += 1) {
       shortCode = codeGenerator();
       try {
-        return { link: await Link.create({ originalUrl: finalUrl, shortCode, isCustomAlias: false, ...(routing ? { adaptiveRouting: { ...routing, defaultDestinationUrl: finalUrl } } : {}), ...metadata }), utmConflicts };
+        return { link: await Link.create({ originalUrl: finalUrl, shortCode, isCustomAlias: false, ...(routing ? { adaptiveRouting: { ...routing, defaultDestinationUrl: finalUrl } } : {}), ...extraFields, ...metadata }), utmConflicts };
       } catch (error) {
         if (error?.code !== 11000) throw error;
       }
@@ -83,7 +95,7 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
   }
 
   async function update(id, input = {}) {
-    const allowed = ['originalUrl', 'title', 'tags', 'status', 'adaptiveRouting'];
+    const allowed = ['originalUrl', 'title', 'tags', 'status', 'adaptiveRouting', 'protection', 'experiments'];
     const keys = Object.keys(input);
     if (!keys.length || keys.some((key) => !allowed.includes(key))) {
       throw Object.assign(new Error('Provide one or more supported link fields to update.'), { status: 400 });
@@ -96,6 +108,17 @@ export function createLinkService(Link, { codeGenerator = generateShortCode } = 
       const destination = normalizeAndValidateUrl(input.originalUrl);
       if (destination.error) throw Object.assign(new Error(destination.error), { status: 400 });
       updates.originalUrl = destination.value;
+    }
+    if (Object.hasOwn(input, 'protection')) {
+      const currentProtection = current.protection?.toObject?.() ?? current.protection;
+      const protectionResult = await normalizeAndValidateProtection(input.protection, currentProtection);
+      if (protectionResult.error) throw Object.assign(new Error(protectionResult.error), { status: 400 });
+      updates.protection = protectionResult.value;
+    }
+    if (Object.hasOwn(input, 'experiments')) {
+      const experimentResult = normalizeAndValidateExperiments(input.experiments);
+      if (experimentResult.error) throw Object.assign(new Error(experimentResult.error), { status: 400 });
+      updates.experiments = experimentResult.value;
     }
     if (Object.hasOwn(input, 'adaptiveRouting')) {
       const previousRouting = current.adaptiveRouting?.toObject?.() ?? current.adaptiveRouting;

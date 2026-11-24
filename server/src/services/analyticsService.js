@@ -1,4 +1,13 @@
 import mongoose from 'mongoose';
+import { sanitizeProtectionForClient } from './linkProtectionService.js';
+
+const successfulAccessFilter = {
+  $or: [
+    { accessStatus: 'allowed' },
+    { accessStatus: { $exists: false } },
+    { accessStatus: null },
+  ],
+};
 
 const dateMatch = (range) => ({ clickedAt: { $gte: range.from, $lt: range.toExclusive } });
 const groupCount = (field) => [
@@ -6,7 +15,7 @@ const groupCount = (field) => [
   { $sort: { count: -1, _id: 1 } },
 ];
 const dailyCounts = (range) => [
-  { $match: dateMatch(range) },
+  { $match: { ...dateMatch(range), ...successfulAccessFilter } },
   { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$clickedAt', timezone: 'UTC' } }, count: { $sum: 1 } } },
   { $sort: { _id: 1 } },
 ];
@@ -15,9 +24,9 @@ export function buildLinkAnalyticsPipeline(linkId, range, now = new Date()) {
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const sevenDays = new Date(today.getTime() - 6 * 86400000);
   const thirtyDays = new Date(today.getTime() - 29 * 86400000);
-  const selected = dateMatch(range);
+  const selected = { ...dateMatch(range), ...successfulAccessFilter };
   return [
-    { $match: { linkId: new mongoose.Types.ObjectId(linkId) } },
+    { $match: { linkId: new mongoose.Types.ObjectId(linkId), ...successfulAccessFilter } },
     { $facet: {
       totals: [{ $group: { _id: null, totalClicks: { $sum: 1 }, clicksToday: { $sum: { $cond: [{ $gte: ['$clickedAt', today] }, 1, 0] } }, clicksLast7Days: { $sum: { $cond: [{ $gte: ['$clickedAt', sevenDays] }, 1, 0] } }, clicksLast30Days: { $sum: { $cond: [{ $gte: ['$clickedAt', thirtyDays] }, 1, 0] } } } }],
       selectedTotal: [{ $match: selected }, { $count: 'count' }],
@@ -36,7 +45,7 @@ export function buildLinkAnalyticsPipeline(linkId, range, now = new Date()) {
 }
 
 export function buildOverviewAnalyticsPipeline(range) {
-  const selected = dateMatch(range);
+  const selected = { ...dateMatch(range), ...successfulAccessFilter };
   return [
     { $match: selected },
     { $facet: {
@@ -126,5 +135,140 @@ export function formatOverviewAnalytics(result, recentLinks = [], range) {
     topReferrers: (data.referrers ?? []).map(({ _id, count }) => ({ hostname: _id, clicks: count })),
     topLinks: data.topLinks ?? [],
     recentlyCreatedLinks: recentLinks,
+  };
+}
+
+export function buildCampaignReportPipeline(linkId, range) {
+  const selected = dateMatch(range);
+  return [
+    { $match: { linkId: new mongoose.Types.ObjectId(linkId) } },
+    { $facet: {
+      lifetimeVisits: [{ $count: 'count' }],
+      lifetimeAllowed: [{ $match: successfulAccessFilter }, { $count: 'count' }],
+      lifetimeBlocked: [
+        { $match: { accessStatus: { $in: ['blocked_expired', 'blocked_max_clicks', 'blocked_password'] } } },
+        { $group: { _id: '$accessStatus', count: { $sum: 1 } } },
+      ],
+      rangeVisits: [{ $match: selected }, { $count: 'count' }],
+      rangeAllowed: [{ $match: { ...selected, ...successfulAccessFilter } }, { $count: 'count' }],
+      rangeBlocked: [
+        { $match: { ...selected, accessStatus: { $in: ['blocked_expired', 'blocked_max_clicks', 'blocked_password'] } } },
+        { $group: { _id: '$accessStatus', count: { $sum: 1 } } },
+      ],
+      experiments: [
+        { $match: { ...selected, ...successfulAccessFilter, 'experiment.variantId': { $ne: null } } },
+        { $group: {
+          _id: {
+            stageId: { $ifNull: ['$experiment.stageId', 'default'] },
+            variantId: '$experiment.variantId',
+            variantLabel: { $ifNull: ['$experiment.variantLabel', '$experiment.variantId'] },
+          },
+          clicks: { $sum: 1 },
+        } },
+        { $sort: { clicks: -1, '_id.variantId': 1 } },
+      ],
+      daily: dailyCounts(range),
+      devices: [{ $match: { ...selected, ...successfulAccessFilter } }, ...groupCount('deviceType')],
+      countries: [
+        { $match: { ...selected, ...successfulAccessFilter } },
+        { $group: { _id: { countryCode: { $ifNull: ['$countryCode', 'unknown'] }, countryName: { $ifNull: ['$countryName', 'Unknown'] } }, count: { $sum: 1 } } },
+        { $sort: { count: -1, '_id.countryName': 1 } },
+      ],
+      referrers: [{ $match: { ...selected, ...successfulAccessFilter, referrer: { $ne: null } } }, ...groupCount('referrer'), { $limit: 10 }],
+    } },
+  ];
+}
+
+export function formatCampaignReport(link, result, range) {
+  const data = result?.[0] ?? {};
+  const lifetimeBlockedRows = keyedCounts(data.lifetimeBlocked);
+  const rangeBlockedRows = keyedCounts(data.rangeBlocked);
+
+  const totalRangeVisits = data.rangeVisits?.[0]?.count ?? 0;
+  const allowedRange = data.rangeAllowed?.[0]?.count ?? 0;
+  const blockedRange = (rangeBlockedRows.blocked_expired ?? 0) + (rangeBlockedRows.blocked_max_clicks ?? 0) + (rangeBlockedRows.blocked_password ?? 0);
+
+  const totalLifetimeVisits = data.lifetimeVisits?.[0]?.count ?? 0;
+  const allowedLifetime = data.lifetimeAllowed?.[0]?.count ?? 0;
+  const blockedLifetime = (lifetimeBlockedRows.blocked_expired ?? 0) + (lifetimeBlockedRows.blocked_max_clicks ?? 0) + (lifetimeBlockedRows.blocked_password ?? 0);
+
+  const protection = sanitizeProtectionForClient(link.protection);
+  const maxClicks = protection.maxClicks;
+  const currentCount = link.lifetimeRedirectCount ?? 0;
+  const capReached = Boolean(maxClicks && currentCount >= maxClicks);
+  const isExpired = Boolean(protection.expiresAt && new Date() > new Date(protection.expiresAt));
+
+  const experimentClicksMap = new Map();
+  for (const exp of data.experiments ?? []) {
+    const key = `${exp._id.stageId}:${exp._id.variantId}`;
+    experimentClicksMap.set(key, exp.clicks);
+  }
+
+  let experimentReports = null;
+  if (link.experiments?.enabled && Array.isArray(link.experiments.variants) && link.experiments.variants.length === 2) {
+    const variants = link.experiments.variants.map((v) => {
+      const clicks = experimentClicksMap.get(`default:${v.variantId}`) ?? 0;
+      return {
+        variantId: v.variantId,
+        label: v.label,
+        destinationUrl: v.destinationUrl,
+        weight: v.weight,
+        clicks,
+      };
+    });
+    const totalExpClicks = variants.reduce((acc, v) => acc + v.clicks, 0);
+    experimentReports = variants.map((v) => ({
+      ...v,
+      trafficPercentage: totalExpClicks > 0 ? Number(((v.clicks / totalExpClicks) * 100).toFixed(1)) : 0,
+    }));
+  }
+
+  return {
+    range: { from: range.fromDate, to: range.toDate, timezone: 'UTC' },
+    link: {
+      id: link.id ?? link._id?.toString(),
+      shortCode: link.shortCode,
+      originalUrl: link.originalUrl,
+      title: link.title ?? '',
+      status: link.status ?? 'active',
+      createdAt: link.createdAt,
+      lifetimeRedirectCount: currentCount,
+      protection,
+    },
+    summary: {
+      range: {
+        totalVisits: totalRangeVisits,
+        allowedRedirects: allowedRange,
+        blockedAttempts: blockedRange,
+        blockedBreakdown: {
+          expired: rangeBlockedRows.blocked_expired ?? 0,
+          maxClicks: rangeBlockedRows.blocked_max_clicks ?? 0,
+          password: rangeBlockedRows.blocked_password ?? 0,
+        },
+      },
+      lifetime: {
+        totalVisits: totalLifetimeVisits,
+        allowedRedirects: allowedLifetime,
+        blockedAttempts: blockedLifetime,
+        blockedBreakdown: {
+          expired: lifetimeBlockedRows.blocked_expired ?? 0,
+          maxClicks: lifetimeBlockedRows.blocked_max_clicks ?? 0,
+          password: lifetimeBlockedRows.blocked_password ?? 0,
+        },
+      },
+    },
+    capStatus: {
+      enabled: protection.enabled && Boolean(maxClicks),
+      maxClicks,
+      lifetimeRedirectCount: currentCount,
+      remainingClicks: maxClicks ? Math.max(0, maxClicks - currentCount) : null,
+      capReached,
+      isExpired,
+    },
+    experiments: experimentReports,
+    dailyClicks: fillDailyRange(data.daily, range),
+    deviceBreakdown: keyedCounts(data.devices),
+    topCountries: (data.countries ?? []).map(({ _id, count }) => ({ countryCode: _id.countryCode, countryName: _id.countryName, clicks: count })),
+    topReferrers: (data.referrers ?? []).map(({ _id, count }) => ({ hostname: _id, clicks: count })),
   };
 }

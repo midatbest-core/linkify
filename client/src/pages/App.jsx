@@ -5,6 +5,7 @@ import AliasSuggestions from '../components/AliasSuggestions.jsx';
 import LinkDashboard from '../components/LinkDashboard.jsx';
 import ShortLinkResult from '../components/ShortLinkResult.jsx';
 import StatusMessage from '../components/StatusMessage.jsx';
+import FlowWorkspace from '../components/FlowWorkspace.jsx';
 import { UTM_KEYS, buildUtmPreview } from '../utils/utm.js';
 import { firstInvalidAdaptiveRule, serializeAdaptiveRule } from '../utils/adaptiveRoutingValidation.js';
 import { beginLatestRequest, cancelLatestRequest, finishLatestRequest, isLatestRequest } from '../utils/latestRequest.js';
@@ -41,7 +42,7 @@ function BrandMark() {
 function AppHeader({ view, setView, onLogout, logoutPending }) {
   return <header className="app-topbar"><div className="mx-auto flex min-h-[70px] max-w-7xl items-center justify-between gap-3 px-4 sm:px-7 lg:px-10">
     <a className="flex items-center gap-2.5 rounded-lg text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand" href="/" aria-label="Linkify home"><BrandMark /><span className="text-xl font-bold tracking-[-.055em]">linkify<span className="text-brand">.</span></span></a>
-    <nav aria-label="Main navigation" className="app-navigation"><button className="nav-pill" aria-current={view === 'create' ? 'page' : undefined} onClick={() => setView('create')}>Create link</button><button className="nav-pill" aria-current={view === 'dashboard' ? 'page' : undefined} onClick={() => setView('dashboard')}>Dashboard</button><button className="nav-pill hidden sm:inline-flex" disabled={logoutPending} onClick={onLogout}>{logoutPending ? 'Logging out…' : 'Log out'}</button><button className="icon-button nav-logout sm:hidden" disabled={logoutPending} aria-label={logoutPending ? 'Logging out' : 'Log out'} onClick={onLogout}>↗</button></nav>
+    <nav aria-label="Main navigation" className="app-navigation"><button className="nav-pill" aria-current={view === 'create' ? 'page' : undefined} onClick={() => setView('create')}>Create</button><button className="nav-pill" aria-current={view === 'flows' ? 'page' : undefined} onClick={() => setView('flows')}>Flows</button><button className="nav-pill" aria-current={view === 'dashboard' ? 'page' : undefined} onClick={() => setView('dashboard')}>Dashboard</button><button className="nav-pill hidden sm:inline-flex" disabled={logoutPending} onClick={onLogout}>{logoutPending ? 'Logging out…' : 'Log out'}</button><button className="icon-button nav-logout sm:hidden" disabled={logoutPending} aria-label={logoutPending ? 'Logging out' : 'Log out'} onClick={onLogout}>↗</button></nav>
   </div></header>;
 }
 
@@ -164,7 +165,7 @@ function App() {
   }
   if (authState === 'loading') return <main className="grid min-h-screen place-items-center bg-canvas px-4 text-sm text-muted"><div className="w-full max-w-sm space-y-4" role="status" aria-label="Checking session"><div className="skeleton h-8 w-40 rounded-lg"/><div className="skeleton h-4 w-full rounded"/><div className="skeleton h-32 w-full rounded-2xl"/><span className="sr-only">Checking session…</span></div></main>;
   if (authState !== 'authenticated') return <AdminLogin onLogin={() => setAuthState('authenticated')} />;
-  return <div className="app-shell"><AppHeader view={view} setView={setView} onLogout={logout} logoutPending={logoutPending}/><main id="main-content">{logoutError && <p role="alert" className="mx-auto max-w-3xl px-4 pt-4 text-sm text-danger">{logoutError}</p>}{view === 'dashboard' ? <LinkDashboard onCreateLink={() => setView('create')} initialExpanded={createdLink?.showAnalytics ? createdLink.id : null} /> : <CreateLinkPage onCreated={(link) => { setCreatedLink(link); if (link.showAnalytics) setView('dashboard'); }} />}</main><footer className="safe-bottom border-t border-line bg-surface px-4 py-5 text-center text-xs text-muted">Linkify <span className="mx-1">·</span> A clearer way to share links.</footer></div>;
+  return <div className="app-shell"><AppHeader view={view} setView={setView} onLogout={logout} logoutPending={logoutPending}/><main id="main-content">{logoutError && <p role="alert" className="mx-auto max-w-3xl px-4 pt-4 text-sm text-danger">{logoutError}</p>}{view === 'dashboard' ? <LinkDashboard onCreateLink={() => setView('create')} initialExpanded={createdLink?.showAnalytics ? createdLink.id : null} /> : view === 'flows' ? <FlowWorkspace /> : <CreateLinkPage onCreated={(link) => { setCreatedLink(link); if (link.showAnalytics) setView('dashboard'); }} />}</main><footer className="safe-bottom border-t border-line bg-surface px-4 py-5 text-center text-xs text-muted">Linkify <span className="mx-1">·</span> A clearer way to share links.</footer></div>;
 }
 
 export default App;

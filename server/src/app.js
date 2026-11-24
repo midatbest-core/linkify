@@ -4,6 +4,7 @@ import { rateLimit } from 'express-rate-limit';
 import Link from './models/Link.js';
 import ClickEvent from './models/ClickEvent.js';
 import AdminSession from './models/AdminSession.js';
+import Flow from './models/Flow.js';
 import { createAdminAuth } from './middleware/adminAuth.js';
 import { createGeoLocator } from './services/geoIpService.js';
 import { createAliasesRouter } from './routes/aliases.js';
@@ -11,8 +12,9 @@ import healthRouter from './routes/health.js';
 import { createAnalyticsRouter } from './routes/analytics.js';
 import { createLinksRouter } from './routes/links.js';
 import { createRedirectRouter } from './routes/redirect.js';
+import { createFlowsRouter } from './routes/flows.js';
 
-export function createApp({ linkModel = Link, clickEventModel = ClickEvent, sessionModel = AdminSession, adminUsername = process.env.ADMIN_USERNAME, adminPasswordHash = process.env.ADMIN_PASSWORD_HASH, clientOrigin = process.env.CLIENT_ORIGIN ?? (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5174'), trustProxyHops = process.env.TRUST_PROXY_HOPS, production = process.env.NODE_ENV === 'production', logger = console, geoLocator = createGeoLocator() } = {}) {
+export function createApp({ linkModel = Link, flowModel = Flow, clickEventModel = ClickEvent, sessionModel = AdminSession, adminUsername = process.env.ADMIN_USERNAME, adminPasswordHash = process.env.ADMIN_PASSWORD_HASH, clientOrigin = process.env.CLIENT_ORIGIN ?? (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5174'), trustProxyHops = process.env.TRUST_PROXY_HOPS, production = process.env.NODE_ENV === 'production', logger = console, geoLocator = createGeoLocator() } = {}) {
   const app = express();
   const proxyHops = trustProxyHops;
   if (proxyHops !== undefined && /^(0|[1-9]\d*)$/.test(proxyHops)) app.set('trust proxy', Number(proxyHops));
@@ -52,6 +54,7 @@ export function createApp({ linkModel = Link, clickEventModel = ClickEvent, sess
     : next());
   app.use('/api', auth.requireAdmin);
   app.use('/api', createAnalyticsRouter({ linkModel, clickEventModel, rateLimitMiddleware: analyticsLimit }));
+  app.use('/api/flows', createFlowsRouter({ flowModel }));
   app.use('/api/links', (request, response, next) => request.method === 'POST'
     ? createLinkLimit(request, response, next)
     : next(), createLinksRouter({ linkModel, clickEventModel }));

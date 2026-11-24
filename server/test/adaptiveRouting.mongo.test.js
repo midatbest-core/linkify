@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import { test } from 'node:test';
 import Link from '../src/models/Link.js';
 import ClickEvent from '../src/models/ClickEvent.js';
+import Flow from '../src/models/Flow.js';
 import { createApp } from '../src/app.js';
 import { createTestAuth } from './testAuth.js';
 import { utcDateTimeToLocal } from '../src/utils/schedule.js';
@@ -16,13 +17,13 @@ if (mongoUri) {
   }
 }
 
-test('isolated MongoDB persists and evaluates smart routing, aggregates clicks, and protects concurrent updates', { skip: !mongoUri }, async (t) => {
+test('isolated MongoDB persists adaptive links and event flows, evaluates routing, and protects concurrent updates', { skip: !mongoUri }, async (t) => {
   const databaseName = `linkify_phase2_test_${process.pid}_${randomUUID().replaceAll('-', '')}`;
   await mongoose.connect(mongoUri, { dbName: databaseName });
-  await Promise.all([Link.syncIndexes(), ClickEvent.syncIndexes()]);
+  await Promise.all([Link.syncIndexes(), ClickEvent.syncIndexes(), Flow.syncIndexes()]);
   const auth = createTestAuth();
   const server = createApp({
-    ...auth, linkModel: Link, clickEventModel: ClickEvent,
+    ...auth, linkModel: Link, flowModel: Flow, clickEventModel: ClickEvent,
     geoLocator: async () => ({ countryName: 'India', countryCode: 'IN', region: null, cityName: null }),
     logger: { error() {}, warn() {} },
   }).listen(0);
@@ -36,6 +37,20 @@ test('isolated MongoDB persists and evaluates smart routing, aggregates clicks, 
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const cookie = await auth.login(baseUrl);
   const headers = { cookie, origin: 'http://localhost:5174', 'content-type': 'application/json' };
+  const flowNodes = [
+    { id: 'entry', position: { x: 0, y: 0 }, data: { kind: 'entry', label: 'Entry' } },
+    { id: 'router', position: { x: 200, y: 0 }, data: { kind: 'router', label: 'Router' } },
+    ...['before', 'during', 'after'].map((phase, index) => ({ id: phase, position: { x: 500, y: index * 100 }, data: { kind: 'destination', phase, label: phase, destinationUrl: `https://example.com/${phase}`, schedule: {} } })),
+    { id: 'fallback', position: { x: 500, y: 400 }, data: { kind: 'fallback', label: 'Fallback', destinationUrl: 'https://example.com/fallback' } },
+  ];
+  const flowResponse = await fetch(`${baseUrl}/api/flows`, { method: 'POST', headers, body: JSON.stringify({ eventName: 'Mongo event', creatorTimeZone: 'Asia/Kolkata', eventStartLocal: '2026-12-01T09:00', eventEndLocal: '2026-12-01T17:00', graph: { nodes: flowNodes, edges: [{ id: 'entry-router', source: 'entry', target: 'router' }, ...flowNodes.slice(2).map((node) => ({ id: `router-${node.id}`, source: 'router', target: node.id }))] } }) });
+  assert.equal(flowResponse.status, 201);
+  const createdFlow = await flowResponse.json();
+  const storedFlow = await Flow.findOne({ flowId: createdFlow.flow.id }).lean();
+  assert.equal(storedFlow.creatorTimeZone, 'Asia/Kolkata');
+  assert.equal(storedFlow.eventStartAtUtc.toISOString(), '2026-12-01T03:30:00.000Z');
+  assert.equal(storedFlow.draft.presentation.nodes.find((node) => node.nodeId === 'during').position.x, 500);
+  assert.equal(storedFlow.draft.routing.stages.find((stage) => stage.phase === 'during').destinationUrl, 'https://example.com/during');
   const now = Date.now();
   const payload = {
     customAlias: `phase2-${randomUUID().slice(0, 8)}`,

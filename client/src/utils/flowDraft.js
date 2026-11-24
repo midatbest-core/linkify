@@ -39,12 +39,44 @@ export function createFlowDraft(timeZone = detectCreatorTimeZone(), withTemplate
   const graph = withTemplate ? createEventLifecycleGraph() : { nodes: [], edges: [] };
   return {
     schemaVersion: 1,
-    title: 'Untitled event flow',
+    id: null,
+    eventName: 'Untitled event flow',
+    description: '',
     status: 'local-draft',
-    timeZone,
+    creatorTimeZone: timeZone,
     timeZoneSource: 'creator-at-creation',
     scheduleStorage: 'utc-instants-with-iana-zone',
+    eventStartLocal: '',
+    eventEndLocal: '',
+    eventStartDisambiguation: 'earlier',
+    eventEndDisambiguation: 'earlier',
+    eventStartAtUtc: null,
+    eventEndAtUtc: null,
+    revision: null,
+    updatedAt: null,
     ...graph,
+  };
+}
+
+export function utcInstantToLocal(value, timeZone) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+export function changeDraftTimeZone(draft, timeZone, mode) {
+  if (!['wall', 'instant'].includes(mode)) throw new Error('Choose whether to preserve wall times or absolute instants.');
+  const convert = (local, instant) => mode === 'instant' && instant ? utcInstantToLocal(instant, timeZone) : local;
+  return {
+    ...draft,
+    creatorTimeZone: timeZone,
+    timeZoneSource: 'explicit',
+    eventStartLocal: convert(draft.eventStartLocal, draft.eventStartAtUtc),
+    eventEndLocal: convert(draft.eventEndLocal, draft.eventEndAtUtc),
+    eventStartAtUtc: null,
+    eventEndAtUtc: null,
+    nodes: draft.nodes.map((node) => node.data.schedule ? { ...node, data: { ...node.data, schedule: { ...node.data.schedule, startLocal: convert(node.data.schedule.startLocal, node.data.schedule.startLocal && node.data.schedule.startAtUtc), endLocal: convert(node.data.schedule.endLocal, node.data.schedule.endLocal && node.data.schedule.endAtUtc), startAtUtc: null, endAtUtc: null } } } : node),
   };
 }
 
@@ -75,10 +107,19 @@ export function isSupportedFlowConnection(connection, nodes, edges) {
 export function durationLabel(startLocal, endLocal) {
   if (!startLocal || !endLocal) return 'Set both times to see duration';
   const milliseconds = new Date(endLocal).getTime() - new Date(startLocal).getTime();
+  return durationFromMilliseconds(milliseconds);
+}
+
+function durationFromMilliseconds(milliseconds) {
   if (!Number.isFinite(milliseconds) || milliseconds <= 0) return 'End must be after start';
   const minutes = Math.round(milliseconds / 60000);
   const days = Math.floor(minutes / 1440);
   const hours = Math.floor((minutes % 1440) / 60);
   const remainder = minutes % 60;
   return [days && `${days}d`, hours && `${hours}h`, remainder && `${remainder}m`].filter(Boolean).join(' ') || '< 1m';
+}
+
+export function instantDurationLabel(startAtUtc, endAtUtc) {
+  if (!startAtUtc || !endAtUtc) return 'Open-ended phase';
+  return durationFromMilliseconds(new Date(endAtUtc).getTime() - new Date(startAtUtc).getTime());
 }

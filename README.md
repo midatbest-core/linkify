@@ -43,7 +43,14 @@ The short URL and printed QR code stay exactly the same. No one has to reprint p
   - Direct RFC 4180 CSV export protected against spreadsheet formula injection.
 - **Linkify Flows (Event-driven visual workflows):**
   - Interactive canvas built with React Flow (`@xyflow/react`) to connect entry points, routers, time-based stages and fallback destinations.
-  - Event schedule configuration with timezone support and automatic handling of daylight saving time transitions.
+  - Guided event creation wizard that asks for the event name, description, start/end dates and timezone upfront before entering the canvas.
+  - Dedicated Event Settings action in the builder toolbar to edit event parameters at any time without recreating the flow.
+  - Context-sensitive inspector that surfaces only settings relevant to the selected node:
+    - Destination nodes show stage labels, URLs and integrated A/B experimentation.
+    - Entry node exposes permanent short URL identity and campaign-wide access protection.
+    - Decision router summarizes the active event schedule with quick access to Event Settings.
+    - Global parameters are never repeated inside individual destination stage inspectors.
+  - Progressive disclosure of Daylight Saving Time (DST) controls, displayed only when the selected timezone and scheduled dates observe daylight transitions.
   - Built-in routing simulator to test how visitors will be routed at different dates and times before publishing, without recording clicks.
   - Atomic publication using MongoDB transactions to generate a live short link and save an immutable publication snapshot.
   - Publication history with database-side pagination to inspect past snapshots, compare configurations and roll back to earlier versions.
@@ -82,7 +89,8 @@ linkify/
 │   │   ├── components/          # Reusable UI components
 │   │   │   ├── FlowWorkspace.jsx    # React Flow builder workspace
 │   │   │   ├── FlowNode.jsx         # Custom canvas nodes
-│   │   │   ├── FlowInspector.jsx    # Node and stage property editor
+│   │   │   ├── FlowInspector.jsx    # Context-sensitive node and stage property editor
+│   │   │   ├── EventSettingsModal.jsx # Dedicated event schedule & timezone configuration modal
 │   │   │   ├── FlowSimulator.jsx    # Interactive flow preview simulator
 │   │   │   ├── FlowTimeline.jsx     # Visual schedule timeline
 │   │   │   ├── FlowAnalytics.jsx    # Flow-level analytics breakdown
@@ -326,15 +334,16 @@ npm run dev --workspace client
 ## How to use Linkify Flows
 
 1. **Log in:** Open the dashboard at http://localhost:5174 and log in with your admin credentials.
-2. **Create a Flow:** Navigate to the **Flows** tab and click **Create Flow**.
-3. **Set the event schedule:** Set the event timezone (e.g. `Asia/Kolkata`) and local start and end times.
-4. **Build the visual graph:**
+2. **Create a Flow:** Navigate to the **Flows** tab and click **Create Flow**. The initial setup dialog prompts you for the event name, description, start and end dates/times, and timezone.
+3. **Build the visual graph:**
    - The canvas displays an Entry node, a Router node, scheduled stage nodes (Before, During, After) and a Fallback node.
-   - Click any destination node to configure its label and target URL.
-5. **Simulate routing:** Open the **Simulator** tab to test where visitors will be redirected at different dates and times.
-6. **Publish:** Click **Publish Flow**. Optionally assign a custom short alias (e.g., `fest2026`). The server atomically creates the short link and saves a publication snapshot.
-7. **Share the link:** Share the generated short link or download its QR code.
-8. **View analytics & history:** Check the **Analytics** tab to monitor click distribution across stages, or inspect past snapshots in the **History** tab and roll back if needed.
+   - Click any destination node to configure its target URL or set up weighted A/B experimentation.
+   - Adjust global event parameters at any time using the **Event Settings** action in the toolbar without restarting your flow.
+   - Configure campaign access protection (passwords, expiration, click limits) at the permanent entry point or flow configuration level.
+4. **Simulate routing:** Open the **Simulator** tab to test where visitors will be redirected at different dates and times.
+5. **Publish:** Click **Publish Flow**. Optionally assign a custom short alias (e.g., `fest2026`). The server atomically creates the short link and saves a publication snapshot.
+6. **Share the link:** Share the generated short link or download its QR code.
+7. **View analytics & history:** Check the **Analytics** tab to monitor click distribution across stages, or inspect past snapshots in the **History** tab and roll back if needed.
 
 ## Testing and verification
 

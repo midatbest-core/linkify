@@ -13,6 +13,30 @@ export function detectCreatorTimeZone() {
   }
 }
 
+export function isDstRelevant(timeZone, dateString) {
+  if (!timeZone || !dateString) return false;
+  try {
+    const year = new Date(dateString).getFullYear() || 2026;
+    const jan = new Date(year, 0, 15);
+    const jul = new Date(year, 6, 15);
+    const getOffset = (d) => {
+      const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'shortOffset' }).formatToParts(d);
+      return parts.find((p) => p.type === 'timeZoneName')?.value;
+    };
+    const janOffset = getOffset(jan);
+    const julOffset = getOffset(jul);
+    if (janOffset === julOffset) {
+      return false; // Time zone does not observe DST
+    }
+    const d = new Date(dateString);
+    if (!Number.isFinite(d.getTime())) return false;
+    const month = d.getMonth();
+    return [2, 3, 4, 8, 9, 10, 11].includes(month);
+  } catch {
+    return false;
+  }
+}
+
 export function createEventLifecycleGraph() {
   const nodes = [
     { id: 'entry', type: 'flowNode', position: { x: 40, y: 205 }, data: { kind: FLOW_NODE_TYPES.ENTRY, eyebrow: 'ENTRY', label: 'Permanent short URL + QR', description: 'One permanent audience entry point' } },

@@ -9,6 +9,7 @@ import FlowAnalytics from './FlowAnalytics.jsx';
 import FlowHistory from './FlowHistory.jsx';
 import QrCode from './QrCode.jsx';
 import AliasSuggestions from './AliasSuggestions.jsx';
+import EventSettingsModal from './EventSettingsModal.jsx';
 import { flowApi } from '../utils/flowApi.js';
 import { changeDraftTimeZone, createEventLifecycleGraph, createFlowDraft, isSupportedFlowConnection } from '../utils/flowDraft.js';
 
@@ -103,6 +104,7 @@ function Editor({ initialFlow, initialValidation, initialPublication, onClose, o
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [eventSettingsOpen, setEventSettingsOpen] = useState(false);
   const [dirty, setDirty] = useState(!base.id);
   const [saveState, setSaveState] = useState('idle');
   const [message, setMessage] = useState('');
@@ -458,6 +460,7 @@ function Editor({ initialFlow, initialValidation, initialPublication, onClose, o
         <div className="flow-save-actions">
           {activeTab === 'builder' && (
             <>
+              <button className="button-secondary" type="button" onClick={() => setEventSettingsOpen(true)}>Event Settings</button>
               <button className="button-secondary" type="button" onClick={clearGraph}>New blank graph</button>
               <button className="button-secondary" type="button" onClick={loadTemplate}>Reset template</button>
               <button className="button-secondary" type="button" disabled={!nodes.some((node) => node.data.kind === 'router') || nodes.length >= 50} onClick={addStage}>+ Add stage</button>
@@ -745,6 +748,7 @@ function Editor({ initialFlow, initialValidation, initialPublication, onClose, o
                 onSelectNode={selectNode}
                 onTimeZoneRequest={(zone) => zone !== draft.creatorTimeZone && setPendingTimeZone(zone)}
                 onRemoveNode={removeSelectedStage}
+                onOpenEventSettings={() => setEventSettingsOpen(true)}
               />
             </div>
           </div>
@@ -823,6 +827,38 @@ function Editor({ initialFlow, initialValidation, initialPublication, onClose, o
           <button className="button-quiet" type="button" onClick={() => setPendingTimeZone(null)}>Cancel</button>
         </div>
       )}
+
+      {/* Dedicated Event Settings Modal */}
+      <EventSettingsModal
+        isOpen={eventSettingsOpen}
+        isInitial={false}
+        initialData={{
+          eventName: draft.eventName,
+          description: draft.description,
+          eventStartLocal: draft.eventStartLocal,
+          eventEndLocal: draft.eventEndLocal,
+          creatorTimeZone: draft.creatorTimeZone,
+          eventStartDisambiguation: draft.eventStartDisambiguation,
+          eventEndDisambiguation: draft.eventEndDisambiguation,
+        }}
+        onSave={(updated) => {
+          if (updated.creatorTimeZone !== draft.creatorTimeZone && (draft.eventStartAtUtc || draft.eventEndAtUtc)) {
+            updateDraft({
+              eventName: updated.eventName,
+              description: updated.description,
+              eventStartLocal: updated.eventStartLocal,
+              eventEndLocal: updated.eventEndLocal,
+              eventStartDisambiguation: updated.eventStartDisambiguation,
+              eventEndDisambiguation: updated.eventEndDisambiguation,
+            });
+            setPendingTimeZone(updated.creatorTimeZone);
+          } else {
+            updateDraft(updated);
+          }
+          setEventSettingsOpen(false);
+        }}
+        onClose={() => setEventSettingsOpen(false)}
+      />
     </section>
   );
 }
@@ -834,6 +870,7 @@ export default function FlowWorkspace({ initialFlowId = null }) {
   const [active, setActive] = useState(null);
   const [activeValidation, setActiveValidation] = useState(null);
   const [activePublication, setActivePublication] = useState(null);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -888,13 +925,33 @@ export default function FlowWorkspace({ initialFlowId = null }) {
   }
 
   return (
-    <FlowList
-      flows={flows}
-      loading={loading}
-      error={error}
-      onNew={() => { setActive(createFlowDraft()); setActiveValidation(null); setActivePublication(null); }}
-      onOpen={open}
-      onRefresh={load}
-    />
+    <>
+      <FlowList
+        flows={flows}
+        loading={loading}
+        error={error}
+        onNew={() => setCreateModalOpen(true)}
+        onOpen={open}
+        onRefresh={load}
+      />
+      <EventSettingsModal
+        isOpen={createModalOpen}
+        isInitial={true}
+        onSave={(formData) => {
+          const initialDraft = createFlowDraft(formData.creatorTimeZone);
+          initialDraft.eventName = formData.eventName;
+          initialDraft.description = formData.description;
+          initialDraft.eventStartLocal = formData.eventStartLocal;
+          initialDraft.eventEndLocal = formData.eventEndLocal;
+          initialDraft.eventStartDisambiguation = formData.eventStartDisambiguation;
+          initialDraft.eventEndDisambiguation = formData.eventEndDisambiguation;
+          setActive(initialDraft);
+          setActiveValidation(null);
+          setActivePublication(null);
+          setCreateModalOpen(false);
+        }}
+        onClose={() => setCreateModalOpen(false)}
+      />
+    </>
   );
 }

@@ -12,6 +12,8 @@ const clickEventSchema = new mongoose.Schema({
   cityName: { type: String, default: null },
   region: { type: String, default: null },
   isBot: { type: Boolean, default: false },
+  flowId: { type: String, default: null, index: true },
+  publicationNumber: { type: Number, default: null },
   selectedDestinationId: { type: String, default: 'default' },
   matchedRuleId: { type: String, default: null },
   usedFallback: { type: Boolean, default: true },

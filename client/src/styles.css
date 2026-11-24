@@ -258,3 +258,10 @@ svg[role="group"]:focus-visible { outline: 2px solid var(--color-brand); outline
   .flow-canvas-wrap { min-height: 430px; }
   .flow-node { width: 205px; min-height: 88px; }
 }
+
+/* Flow Workspace Navigation Tabs and Milestone 4 Views */
+.flow-view-tabs { display: flex; align-items: center; gap: 4px; margin-top: 18px; border-bottom: 1px solid #daddd2; overflow-x: auto; }
+.flow-tab-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 16px; border-radius: 10px 10px 0 0; color: #626e64; font-size: .85rem; font-weight: 650; background: transparent; border: 1px solid transparent; border-bottom: 0; transition: color var(--motion-fast), background var(--motion-fast); cursor: pointer; white-space: nowrap; }
+.flow-tab-btn:hover { color: #19241d; background: #f1f0e9; }
+.flow-tab-btn[aria-selected="true"] { color: #245b2b; background: #fffefa; border-color: #daddd2; box-shadow: 0 2px 0 0 #fffefa; }
+.status-archived { color: #6b5945; background: #f3eee7; border: 1px solid #ded5c9; }

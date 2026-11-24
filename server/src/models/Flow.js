@@ -37,13 +37,18 @@ const flowSchema = new mongoose.Schema({
     routing: { stages: { type: [stageSchema], default: [] }, fallbackNodeId: { type: String, default: null }, fallbackDestinationUrl: { type: String, default: '' } },
   },
   publishedRevision: { type: Number, default: null },
+  publicationSequence: { type: Number, default: 0 },
   publishedConfiguration: { type: mongoose.Schema.Types.Mixed, default: null },
   publishedAt: { type: Date, default: null },
   publicationHistory: { type: [mongoose.Schema.Types.Mixed], default: [] },
-  publicationRequests: { type: [new mongoose.Schema({ key: { type: String, required: true }, payloadHash: { type: String, required: true }, revision: { type: Number, required: true }, linkId: { type: mongoose.Schema.Types.ObjectId, required: true }, shortCode: { type: String, required: true }, publishedAt: { type: Date, required: true } }, { _id: false })], default: [] },
+  publicationRequests: { type: [new mongoose.Schema({ key: { type: String, required: true }, payloadHash: { type: String, required: true }, operation: { type: String, enum: ['publish', 'rollback', 'archive', 'restore'], default: 'publish' }, revision: { type: Number, required: true }, publicationNumber: { type: Number, default: null }, linkId: { type: mongoose.Schema.Types.ObjectId, required: true }, shortCode: { type: String, required: true }, publishedAt: { type: Date, required: true }, expiresAt: { type: Date, default: null } }, { _id: false })], default: [] },
+  lifecycleStatus: { type: String, enum: ['active', 'archived'], default: 'active' },
+  lifecycleChangedAt: { type: Date, default: null },
+  operationVersion: { type: Number, min: 0, default: 0 },
   linkId: { type: mongoose.Schema.Types.ObjectId, ref: 'Link', default: null },
 }, { collection: 'flows', timestamps: true });
 
 flowSchema.index({ updatedAt: -1 });
+flowSchema.index({ 'publicationRequests.expiresAt': 1 });
 
 export default mongoose.models.Flow ?? mongoose.model('Flow', flowSchema);

@@ -64,6 +64,10 @@ export function createRedirectRouter({ linkModel = Link, clickEventModel = Click
             selectedDestinationId: routing.selectedDestinationId,
             matchedRuleId: routing.matchedRuleId,
             usedFallback: routing.usedFallback,
+            ...(link.management?.ownerType === 'flow' ? {
+              flowId: link.management.flowId,
+              publicationNumber: link.management.publicationNumber ?? null,
+            } : {}),
           })).catch(logAnalyticsFailure);
         } catch (analyticsError) { logAnalyticsFailure(analyticsError); }
       }

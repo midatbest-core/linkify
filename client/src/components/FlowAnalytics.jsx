@@ -248,7 +248,12 @@ export default function FlowAnalytics({ flowId, publication, initialData = null 
                           {row.clicks}
                         </td>
                         <td className="px-4 py-3 text-right text-muted">
-                          {share}%
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="hidden sm:block w-14 h-1.5 rounded-full bg-line overflow-hidden">
+                              <div className="h-full bg-brand rounded-full transition-all duration-300" style={{ width: `${Math.min(100, Math.max(0, share))}%` }} />
+                            </div>
+                            <span className="font-medium text-ink">{share}%</span>
+                          </div>
                         </td>
                       </tr>
                     );

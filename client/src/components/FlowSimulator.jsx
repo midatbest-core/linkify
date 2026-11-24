@@ -240,9 +240,9 @@ export default function FlowSimulator({ flowId, creatorTimeZone, eventStartLocal
               {/* Draft vs Published Side-by-Side */}
               <div className="grid gap-4 sm:grid-cols-2">
                 {/* Draft routing card */}
-                <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-muted">DRAFT ROUTING</span>
+                <div className={`rounded-xl border bg-surface p-4 sm:p-5 shadow-sm transition ${result.draft?.usedFallback ? 'border-[#ebd9a2] bg-[#fffdfa]' : 'border-line hover:border-[#b9d0b2]'}`}>
+                  <div className="flex items-center justify-between border-b border-line pb-3">
+                    <span className="text-xs font-bold text-muted uppercase tracking-wider">DRAFT ROUTING</span>
                     <span className={`status-pill ${result.draft?.usedFallback ? 'status-off' : 'status-on'}`}>
                       {result.draft?.usedFallback ? 'Fallback' : 'Stage match'}
                     </span>
@@ -250,28 +250,28 @@ export default function FlowSimulator({ flowId, creatorTimeZone, eventStartLocal
                   {result.draftError ? (
                     <p className="mt-3 text-xs text-danger">{result.draftError}</p>
                   ) : result.draft ? (
-                    <div className="mt-3 space-y-2">
+                    <div className="mt-3.5 space-y-3">
                       <div>
-                        <span className="text-xs text-muted">Matched stage:</span>
-                        <p className="text-sm font-semibold text-ink">{result.draft.stageLabel}</p>
+                        <span className="text-xs text-muted font-medium">Matched stage:</span>
+                        <p className="text-base font-bold text-ink mt-0.5">{result.draft.stageLabel}</p>
                       </div>
                       <div>
-                        <span className="text-xs text-muted">Resolved destination:</span>
+                        <span className="text-xs text-muted font-medium">Resolved destination:</span>
                         <a
                           href={result.draft.destinationUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="block break-all text-xs font-semibold text-brand-strong underline"
+                          className="mt-0.5 block break-all text-xs font-semibold text-brand-strong hover:text-brand underline underline-offset-2"
                         >
                           {result.draft.destinationUrl}
                         </a>
                       </div>
-                      <div className="rounded-lg bg-canvas-subtle p-2 text-xs text-muted">
-                        <strong className="block text-ink mb-0.5">Condition match:</strong>
+                      <div className="rounded-lg bg-canvas-subtle p-2.5 text-xs text-muted">
+                        <strong className="block text-ink mb-0.5 font-semibold">Condition match:</strong>
                         {result.draft.conditionSummary}
                       </div>
                       {result.draft.fallbackReason && (
-                        <p className="text-xs text-[#876b34] bg-[#fff9ed] p-2 rounded-lg">
+                        <p className="text-xs text-[#876b34] bg-[#fff9ed] p-2.5 rounded-lg border border-[#ebd9a2]">
                           {result.draft.fallbackReason}
                         </p>
                       )}
@@ -282,9 +282,9 @@ export default function FlowSimulator({ flowId, creatorTimeZone, eventStartLocal
                 </div>
 
                 {/* Published routing card */}
-                <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-muted">LIVE PUBLISHED</span>
+                <div className={`rounded-xl border bg-surface p-4 sm:p-5 shadow-sm transition ${!result.published ? 'border-line opacity-80' : result.published.usedFallback ? 'border-[#ebd9a2] bg-[#fffdfa]' : 'border-line hover:border-[#b9d0b2]'}`}>
+                  <div className="flex items-center justify-between border-b border-line pb-3">
+                    <span className="text-xs font-bold text-muted uppercase tracking-wider">LIVE PUBLISHED</span>
                     {result.published ? (
                       <span className={`status-pill ${result.published.usedFallback ? 'status-off' : 'status-on'}`}>
                         {result.published.usedFallback ? 'Fallback' : 'Stage match'}
@@ -294,28 +294,28 @@ export default function FlowSimulator({ flowId, creatorTimeZone, eventStartLocal
                     )}
                   </div>
                   {result.published ? (
-                    <div className="mt-3 space-y-2">
+                    <div className="mt-3.5 space-y-3">
                       <div>
-                        <span className="text-xs text-muted">Matched stage:</span>
-                        <p className="text-sm font-semibold text-ink">{result.published.stageLabel}</p>
+                        <span className="text-xs text-muted font-medium">Matched stage:</span>
+                        <p className="text-base font-bold text-ink mt-0.5">{result.published.stageLabel}</p>
                       </div>
                       <div>
-                        <span className="text-xs text-muted">Resolved destination:</span>
+                        <span className="text-xs text-muted font-medium">Resolved destination:</span>
                         <a
                           href={result.published.destinationUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="block break-all text-xs font-semibold text-brand-strong underline"
+                          className="mt-0.5 block break-all text-xs font-semibold text-brand-strong hover:text-brand underline underline-offset-2"
                         >
                           {result.published.destinationUrl}
                         </a>
                       </div>
-                      <div className="rounded-lg bg-canvas-subtle p-2 text-xs text-muted">
-                        <strong className="block text-ink mb-0.5">Condition match:</strong>
+                      <div className="rounded-lg bg-canvas-subtle p-2.5 text-xs text-muted">
+                        <strong className="block text-ink mb-0.5 font-semibold">Condition match:</strong>
                         {result.published.conditionSummary}
                       </div>
                       {result.published.fallbackReason && (
-                        <p className="text-xs text-[#876b34] bg-[#fff9ed] p-2 rounded-lg">
+                        <p className="text-xs text-[#876b34] bg-[#fff9ed] p-2.5 rounded-lg border border-[#ebd9a2]">
                           {result.published.fallbackReason}
                         </p>
                       )}

@@ -118,6 +118,7 @@ const results = {
   mobileViews: [],
 };
 
+let testFailed = false;
 try {
   // =========================================================================
   // Desktop Workflow (13 Steps)
@@ -385,13 +386,16 @@ try {
   console.log('[acceptance] All Desktop & Mobile acceptance workflows PASSED!');
   console.log('[acceptance] Summary:', JSON.stringify(results, null, 2));
 } catch (err) {
+  testFailed = true;
   console.error('[acceptance] Test failure:', err);
-  throw err;
 } finally {
-  await browser.close();
-  viteDev.kill();
-  backendServer.close();
-  await replSet.stop();
+  try { await browser.close(); } catch {}
+  try { viteDev.kill(); } catch {}
+  try { backendServer.close(); } catch {}
+  try { await replSet.stop(); } catch {}
   console.log('[acceptance] Cleaned up servers and database.');
+  if (testFailed) {
+    process.exit(1);
+  }
   process.exit(0);
 }

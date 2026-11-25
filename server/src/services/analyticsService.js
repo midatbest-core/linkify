@@ -194,7 +194,7 @@ export function formatCampaignReport(link, result, range) {
 
   const protection = sanitizeProtectionForClient(link.protection);
   const maxClicks = protection.maxClicks;
-  const currentCount = link.lifetimeRedirectCount ?? 0;
+  const currentCount = Math.max(link.lifetimeRedirectCount ?? 0, allowedLifetime);
   const capReached = Boolean(maxClicks && currentCount >= maxClicks);
   const isExpired = Boolean(protection.expiresAt && new Date() > new Date(protection.expiresAt));
 

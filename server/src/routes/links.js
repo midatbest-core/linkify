@@ -112,7 +112,7 @@ export function createLinksRouter({ linkModel = Link, clickEventModel = ClickEve
         total = count;
       }
       const baseUrl = (process.env.SHORT_BASE_URL ?? `${request.protocol}://${request.get('host')}`).replace(/\/$/, '');
-      response.json({ links: links.map((link) => ({ ...serializeLink(link, baseUrl), clickCount: link.clickCount ?? 0 })), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+      response.json({ links: links.map((link) => ({ ...serializeLink(link, baseUrl), clickCount: link.clickCount ?? link.lifetimeRedirectCount ?? 0 })), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
     } catch (error) { next(error); }
   });
 

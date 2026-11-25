@@ -133,10 +133,17 @@ export function createRedirectRouter({ linkModel = Link, clickEventModel = Click
       };
 
       const recordClickAsync = (extra = {}) => {
-        Promise.resolve().then(async () => ({
-          ...classification,
-          ...geography,
-        })).then((record) => clickEventModel.create({
+        Promise.resolve().then(async () => {
+          if (extra.accessStatus === 'allowed' && !(link.protection?.enabled && link.protection?.maxClicks > 0)) {
+            if (typeof linkModel.updateOne === 'function') {
+              await linkModel.updateOne({ _id: link._id }, { $inc: { lifetimeRedirectCount: 1 } }).catch(() => {});
+            }
+          }
+          return {
+            ...classification,
+            ...geography,
+          };
+        }).then((record) => clickEventModel.create({
           linkId: link._id,
           clickedAt: new Date(),
           ...record,

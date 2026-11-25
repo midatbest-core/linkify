@@ -57,7 +57,11 @@ export function createAnalyticsRouter({ linkModel = Link, clickEventModel = Clic
       const link = await linkModel.findById(request.params.id);
       if (!link) return response.status(404).json({ error: 'Link not found.' });
       const result = await runAggregate(clickEventModel, buildCampaignReportPipeline(request.params.id, range));
-      response.json({ report: formatCampaignReport(link, result, range) });
+      const report = formatCampaignReport(link, result, range);
+      if (typeof linkModel.updateOne === 'function' && (link.lifetimeRedirectCount ?? 0) < report.link.lifetimeRedirectCount) {
+        linkModel.updateOne({ _id: link._id }, { $set: { lifetimeRedirectCount: report.link.lifetimeRedirectCount } }).catch(() => {});
+      }
+      response.json({ report });
     } catch (error) {
       if (error.status === 400) return response.status(400).json({ error: error.message });
       next(error);
@@ -73,6 +77,9 @@ export function createAnalyticsRouter({ linkModel = Link, clickEventModel = Clic
 
       const result = await runAggregate(clickEventModel, buildCampaignReportPipeline(request.params.id, range));
       const report = formatCampaignReport(link, result, range);
+      if (typeof linkModel.updateOne === 'function' && (link.lifetimeRedirectCount ?? 0) < report.link.lifetimeRedirectCount) {
+        linkModel.updateOne({ _id: link._id }, { $set: { lifetimeRedirectCount: report.link.lifetimeRedirectCount } }).catch(() => {});
+      }
 
       const overviewHeaders = [
         { label: 'Short Code', key: 'shortCode' },

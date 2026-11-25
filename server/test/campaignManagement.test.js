@@ -380,6 +380,19 @@ test('redirect & protection integration: expired, capped, and password-protected
       }
       return link;
     },
+    async updateOne(filter, update) {
+      const link = links.get(filter.shortCode) ?? [...links.values()].find((l) => l._id === filter._id);
+      if (!link) return { matchedCount: 0, modifiedCount: 0 };
+      if (update.$inc) {
+        for (const [k, v] of Object.entries(update.$inc)) {
+          link[k] = (link[k] ?? 0) + v;
+        }
+      }
+      if (update.$set) {
+        Object.assign(link, update.$set);
+      }
+      return { matchedCount: 1, modifiedCount: 1 };
+    },
   };
 
   const clickEventModel = {
@@ -577,6 +590,19 @@ test('combined campaign workflow: password unlock, rejection, expiration, concur
       }
       return link;
     },
+    async updateOne(filter, update) {
+      const link = links.get(filter.shortCode) ?? [...links.values()].find((l) => l._id === filter._id);
+      if (!link) return { matchedCount: 0, modifiedCount: 0 };
+      if (update.$inc) {
+        for (const [k, v] of Object.entries(update.$inc)) {
+          link[k] = (link[k] ?? 0) + v;
+        }
+      }
+      if (update.$set) {
+        Object.assign(link, update.$set);
+      }
+      return { matchedCount: 1, modifiedCount: 1 };
+    },
   };
 
   const clickEventModel = {
@@ -708,6 +734,94 @@ test('combined campaign workflow: password unlock, rejection, expiration, concur
     });
     assert.equal(resSticky.status, 302);
     assert.equal(resSticky.headers.get('location'), 'https://example.com/beta');
+  } finally {
+    server.close();
+  }
+});
+
+test('uncapped links track lifetimeRedirectCount and campaign reports recover historical counts', async () => {
+  const { createApp } = await import('../src/app.js');
+  const { formatCampaignReport } = await import('../src/services/analyticsService.js');
+  const { parseDateRange } = await import('../src/utils/dateRange.js');
+
+  const links = new Map();
+  const clickEvents = [];
+
+  const linkModel = {
+    async findOne({ shortCode }) {
+      return links.get(shortCode) ?? null;
+    },
+    async findById(id) {
+      return [...links.values()].find((l) => l._id === id || l.id === id) ?? null;
+    },
+    async updateOne(filter, update) {
+      const link = links.get(filter.shortCode) ?? [...links.values()].find((l) => l._id === filter._id);
+      if (!link) return { matchedCount: 0, modifiedCount: 0 };
+      if (update.$inc) {
+        for (const [k, v] of Object.entries(update.$inc)) {
+          link[k] = (link[k] ?? 0) + v;
+        }
+      }
+      if (update.$set) {
+        Object.assign(link, update.$set);
+      }
+      return { matchedCount: 1, modifiedCount: 1 };
+    },
+  };
+
+  const clickEventModel = {
+    async create(event) {
+      const record = { ...event, _id: `clk_${clickEvents.length + 1}` };
+      clickEvents.push(record);
+      return record;
+    },
+  };
+
+  links.set('standard1', {
+    _id: '507f1f77bcf86cd799439099',
+    shortCode: 'standard1',
+    originalUrl: 'https://example.com/dest',
+    status: 'active',
+    lifetimeRedirectCount: 0,
+    protection: { enabled: false },
+  });
+
+  const app = createApp({ linkModel, clickEventModel });
+  const server = app.listen(0);
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const res = await fetch(`${baseUrl}/standard1`, { redirect: 'manual' });
+    assert.equal(res.status, 302);
+    // Allow async recording to settle
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(links.get('standard1').lifetimeRedirectCount, 1);
+
+    // Verify formatCampaignReport recovers lifetimeRedirectCount when database had 0
+    const legacyLink = {
+      _id: '507f1f77bcf86cd799439098',
+      shortCode: 'legacy1',
+      originalUrl: 'https://example.com/legacy',
+      lifetimeRedirectCount: 0,
+      protection: { enabled: false },
+    };
+    const mockAggResult = [{
+      lifetimeAllowed: [{ count: 7 }],
+      lifetimeVisits: [{ count: 7 }],
+      lifetimeBlocked: [],
+      rangeVisits: [{ count: 7 }],
+      rangeAllowed: [{ count: 7 }],
+      rangeBlocked: [],
+      daily: [],
+      devices: [],
+      countries: [],
+      referrers: [],
+    }];
+    const range = parseDateRange({ from: '2026-11-01', to: '2026-11-25' });
+    const report = formatCampaignReport(legacyLink, mockAggResult, range);
+    assert.equal(report.link.lifetimeRedirectCount, 7, 'Lifetime redirect count must reflect actual allowed clicks');
+    assert.equal(report.capStatus.lifetimeRedirectCount, 7);
   } finally {
     server.close();
   }
